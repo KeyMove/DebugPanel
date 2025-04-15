@@ -1,0 +1,5132 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BLESWD</title>
+</head>
+<style>
+    *{
+        padding: 0;margin: 0;
+        box-sizing: border-box;
+    }
+    body{
+        overflow: hidden;
+    }
+    .mainpanel{
+        display: flex;
+        min-height: 100vh;
+        background: linear-gradient(135deg,
+        hsl(170deg,80%,70%),
+        hsl(190deg,80%,70%),
+        hsl(250deg,80%,70%),
+        hsl(320deg,80%,70%)
+        );
+        justify-content: center;
+        align-items: center;
+        background-size: 200% 200%;
+        animation: gradient-move 30s infinite alternate;
+    }
+    @keyframes gradient-move {
+        0%{background-position: 0% 0%;}
+        100%{background-position: 100% 100%;}
+    }
+    .box{
+        display: block;
+        background:rgba(255, 255, 255, .1);
+        min-height: 400px;
+        border-radius: 10px;
+        backdrop-filter: blur(10px);
+        box-shadow: 0 25px 45px rgba(0,0,0,0.1);
+    }
+    .box::before{
+        display: block;
+        content: "STLINK/BLE/UART下载器";
+        text-align: center;
+        font-size: 1.5em;
+        
+    }
+    .boxitems{
+        border-top: 2px solid #000;
+        display: flex;
+        margin: 1em;
+    }
+    .vbox{
+        display: block;
+    }
+    .bt{
+        
+        width: 100%;
+        background:rgba(255, 255, 255, .2);
+        border: none;
+        padding: 10px 20px;
+        border-radius: 35px;
+        border: 1px solid rgba(255, 255, 255, .5);
+        border-right: 1px solid rgba(255, 255, 255, .2);
+        border-bottom: 1px solid rgba(255, 255, 255, .2);
+        font-size: 16px;
+        box-shadow: 0 5px 15px rgba(255, 255, 255, .1);
+        cursor: pointer;
+        margin-bottom: 5px;
+    }
+    .bt:hover{
+        box-shadow: 0 0 10px rgba(255, 255, 255, 0.3),
+        0 0 60px rgba(255, 255, 255, 0.3);
+    }
+    .btl{
+        border-top-right-radius: 0;
+        border-bottom-right-radius: 0;
+        border-right: 0;
+    }
+    .btr{
+        border-top-left-radius: 0;
+        border-bottom-left-radius: 0;
+        border-left: 0;
+    }
+
+</style>
+<body>
+<div class="mainpanel">
+    <div class="box">
+        <div id="dirselect" style="margin: 10px; display: flex; justify-content: center;">
+            <button id="com_open_btn" class="bt btl" onclick="COM.open(921600)">连接设备</button>
+            <select oninput="this.previousElementSibling.innerText='连接'+this.value;selectdevice(this.value);" id="interfaceselect" style=" position: absolute; margin-left: -25px;margin-top: 11px; width: 15px;height: 22px;border: 0px;background-color: transparent;">
+                <option>UART</option>
+                <option selected>BLE</option>
+                <option>STLINK</option>
+            </select>
+            <button class="bt btr" onclick="" style="cursor: default;">
+                <input oninput="filterSelect()" type="text" id="romfit" placeholder="选择型号" style="position: absolute;right: 58px; width: 100px;height: 23px;background-color: transparent;">
+                <select oninput="loadrom()" id="romselect" style=" margin-left: 90px; width: 15px;height: 22px;border: 0px;background-color: transparent;">
+                    <option selected>TEST</option>
+                </select>
+            </button>
+        </div>
+        <div style="margin: 10px; display: flex; justify-content: center;">
+            <button class="bt" onclick="" style="cursor: default;">下载算法选择
+                <select id="flmselect" style="border: 0px;background-color: transparent;width: 60%;">
+                    <option selected>PY32F002A</option>
+                </select>
+            </button>
+        </div>
+        <div class="boxitems">
+            <div class="imgpanel" onclick="fileInput.click()">
+                <input type="file" id="fileInput" accept=".axf, .flm, .hex" style="display: none;" />
+                <canvas id="canvas" class="panel" width="308" height="280" style="display: block; margin: auto; border: 2px dashed #ccc;"></canvas>
+            </div>
+            <div style="display: block;overflow: hidden;">
+                <div id="outputtext" contenteditable="true" style="max-width: 400px;" ></div>
+            </div>
+        </div>
+        <div style="margin: 10px; display: none; justify-content: center;">
+            <progress id="flmupload" value="0" max="100" style="width: 100%;"></progress>
+        </div>
+        <div style="margin: 10px; display: flex; justify-content: center;">
+            <button class="bt btl" id="startdownload" onclick="downloadselect()" >
+                <input type="checkbox" id="autodownload">
+                下载</button>
+            <button class="bt btr" onclick="debugpanel.show();excelpanel.show();">打开调试面板</button>
+        </div>
+    </div>
+</div>
+</body>
+<script>
+    async function showDirectoryStructure() {
+        try {
+            const directoryHandle = root = await window.showDirectoryPicker();
+            //console.log("Directory structure:", directoryHandle);
+            
+            // 遍历文件夹结构
+            async function traverseDirectory(handle,allfile={},path='') {
+                const e=handle.entries();
+                for await(const entry of e) {
+                    //console.log(entry);
+                    if(entry[1].kind==='file'){
+                        let index=entry[0].lastIndexOf('.');
+                        let fname=index<0?entry[0]:entry[0].substring(0,index);
+                        let extname=index<0?null:entry[0].substring(index);
+                        allfile[path+entry[0]]={name:entry[0],_name:fname,ext:extname,dir:handle,file:entry[1],path:path};
+                    }
+                    else{
+                        //allfile[0].push({name:entry[0],dir:handle,file:entry[1]});
+                        allfile[path+entry[0]]={name:entry[0],dir:entry[1],file:entry[1]};
+                        await traverseDirectory(entry[1],allfile,path+entry[0]+'/');
+                    }
+                }
+                return allfile;
+            }
+            let files=await traverseDirectory(directoryHandle);
+            files['/']=directoryHandle;
+            console.log(files);
+            return files;
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    function fitfile(f,ext){
+        let tab={};
+        for(let [k,v] of Object.entries(f)){ 
+            if(v.ext==ext){
+                tab[k]=v;
+            }
+        }
+        return tab;
+    }
+
+    function createFolder(directoryHandle, folderName) {
+        return new Promise((resolve, reject) => {
+            directoryHandle.getDirectoryHandle(folderName, { create: true })
+                .then(folderHandle => {
+                    resolve(folderHandle);
+                })
+                .catch(error => {
+                    reject(error);
+                });
+        });
+    }
+
+    async function createfile(name,value,dir){
+        let fileHandle = await dir.getFileHandle(name,{ create: true })
+        .then(e=>e.createWritable())
+        .then(e=>{e.write(new Blob([value], { type: 'text/plain' }));return e.close()});
+    }
+
+
+    async function checkFileUpdate(fileHandle) {
+        try {
+            const file = await fileHandle.getFile();
+            const fileModifiedDate = new Date(file.lastModified);
+            const currentDate = new Date();
+            const timeDifference = currentDate - fileModifiedDate;
+            const updateThreshold = 1000 * 60 * 5; // 5 minutes in milliseconds
+            if (timeDifference < updateThreshold) {
+                console.log(`File ${file.name} has been updated recently.`);
+                return true;
+            } else {
+                console.log(`File ${file.name} has not been updated recently.`);
+                return false;
+            }
+        } catch (error) {
+            console.error(`Error checking file update: ${error}`);
+            return false;
+        }
+    }
+</script>
+<script>
+    function download_uint8(data,name='rom.bin'){
+        if(!data)return;
+        if(Array.isArray(data)){
+            data=new Uint8Array(data);
+        }
+        const blob = new Blob([data], { type: 'application/octet-stream' });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        link.href = url;
+        link.download = name;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    function Elfparse(elfarray){
+        if (Array.isArray(elfarray)) {
+            elfarray = new Uint8Array(elfarray);
+        }
+        let elfHeaderView = new DataView(elfarray.buffer);
+        let elfMagic = elfHeaderView.getUint32(0, true); // ELF magic number
+        if (elfMagic !== 0x464c457f) {
+            console.error('Not a valid ELF file');
+            return;
+        }
+        let elfHeader = {
+            'e_ident': elfarray.slice(0, 16),
+            'e_type': elfHeaderView.getUint16(16, true),
+            'e_machine': elfHeaderView.getUint16(18, true),
+            'e_version': elfHeaderView.getUint32(20, true),
+            'e_entry': elfHeaderView.getUint32(24, true),
+            'e_phoff': elfHeaderView.getUint32(28, true),
+            'e_shoff': elfHeaderView.getUint32(32, true),
+            'e_flags': elfHeaderView.getUint32(36, true),
+            'e_ehsize': elfHeaderView.getUint16(40, true),
+            'e_phentsize': elfHeaderView.getUint16(42, true),
+            'e_phnum': elfHeaderView.getUint16(44, true),
+            'e_shentsize': elfHeaderView.getUint16(46, true),
+            'e_shnum': elfHeaderView.getUint16(48, true),
+            'e_shstrndx': elfHeaderView.getUint16(50, true)
+        };
+        let elfProgramHeaders = [];
+        for (let i = 0; i < elfHeader.e_phnum; i++) {
+            let offset = elfHeader.e_phoff + i * elfHeader.e_phentsize;
+            let programHeader = {
+                'p_type': elfHeaderView.getUint32(offset, true),
+                'p_offset': elfHeaderView.getUint32(offset + 4, true),
+                'p_vaddr': elfHeaderView.getUint32(offset + 8, true),
+                'p_paddr': elfHeaderView.getUint32(offset + 12, true),
+                'p_filesz': elfHeaderView.getUint32(offset + 16, true),
+                'p_memsz': elfHeaderView.getUint32(offset + 20, true),
+                'p_flags': elfHeaderView.getUint32(offset + 24, true),
+                'p_align': elfHeaderView.getUint32(offset + 28, true)
+            };
+            elfProgramHeaders.push(programHeader);
+        }
+        let info={};
+        let rom = [];
+        for (let i = 0; i < elfProgramHeaders.length; i++) {
+            if (elfProgramHeaders[i].p_type === 1 && (elfProgramHeaders[i].p_flags & 0x4) !== 0) {
+                rom.push(elfarray.slice(elfProgramHeaders[i].p_offset, elfProgramHeaders[i].p_offset + elfProgramHeaders[i].p_filesz));
+            }
+        }
+        let elfSectionHeaders = [];
+        for (let i = 0; i < elfHeader.e_shnum; i++) {
+            let offset = elfHeader.e_shoff + i * elfHeader.e_shentsize;
+            let sectionHeader = {
+                'sh_name': elfHeaderView.getUint32(offset, true),
+                'sh_type': elfHeaderView.getUint32(offset + 4, true),
+                'sh_flags': elfHeaderView.getUint32(offset + 8, true),
+                'sh_addr': elfHeaderView.getUint32(offset + 12, true),
+                'sh_offset': elfHeaderView.getUint32(offset + 16, true),
+                'sh_size': elfHeaderView.getUint32(offset + 20, true),
+                'sh_link': elfHeaderView.getUint32(offset + 24, true),
+                'sh_info': elfHeaderView.getUint32(offset + 28, true),
+                'sh_addralign': elfHeaderView.getUint32(offset + 32, true),
+                'sh_entsize': elfHeaderView.getUint32(offset + 36, true)
+            };
+            elfSectionHeaders.push(sectionHeader);
+        }
+        
+
+        let elfSectionMap={};
+        let elfSectionNames = [];
+        let shstrtab = elfarray.slice(elfSectionHeaders[elfHeader.e_shstrndx].sh_offset, elfSectionHeaders[elfHeader.e_shstrndx].sh_offset + elfSectionHeaders[elfHeader.e_shstrndx].sh_size);
+        for (let i = 0; i < elfHeader.e_shnum; i++) {
+            let offset = elfSectionHeaders[i].sh_name;
+            let name = '';
+            for (let j = offset; shstrtab[j] !== 0; j++) {
+                name += String.fromCharCode(shstrtab[j]);
+            }
+            elfSectionNames.push(name);
+            elfSectionMap[name]=elfSectionHeaders[i];
+        }
+        let elfSymbolsSection = null;
+        let elfStringSection = null;
+        let elfStringMap = {};
+        let symtabindex=-1;
+        for (let i = 0; i < elfHeader.e_shnum; i++) {
+            if (elfSectionNames[i] === '.symtab') {
+                symtabindex=i;
+                elfSymbolsSection = elfarray.slice(elfSectionHeaders[i].sh_offset, elfSectionHeaders[i].sh_offset + elfSectionHeaders[i].sh_size);
+            }
+            if (elfSectionNames[i] === '.strtab') {
+                let strtabSection = elfStringSection = elfarray.slice(elfSectionHeaders[i].sh_offset, elfSectionHeaders[i].sh_offset + elfSectionHeaders[i].sh_size);
+                for (let j = 0; j < strtabSection.length; j++) {
+                    let name = '';
+                    let startindex=j;
+                    while (strtabSection[j] !== 0) {
+                        name += String.fromCharCode(strtabSection[j]);
+                        j++;
+                    }
+                    elfStringMap[startindex]=name;
+                }
+            }
+        }
+        let elfSymbols = [];
+        let symbolNames = {};
+        if (elfSymbolsSection) {
+            let symbolSize = 16; // Assuming 32-bit ELF
+            let numSymbols = elfSymbolsSection.length / symbolSize;
+            for (let i = 0; i < numSymbols; i++) {
+                let offset = elfSectionHeaders[symtabindex].sh_offset + i * symbolSize;
+                let symbol = {
+                    'st_name':  elfHeaderView.getUint32(offset, true),
+                    'st_value': elfHeaderView.getUint32(offset + 4, true),
+                    'st_size':  elfHeaderView.getUint32(offset + 8, true),
+                    'st_info':  elfHeaderView.getUint8(offset + 12),
+                    'st_other': elfHeaderView.getUint8(offset + 13),
+                    'st_shndx': elfHeaderView.getUint16(offset + 14, true)
+                };
+                elfSymbols.push(symbol);
+            }
+            
+            for (let symbol of elfSymbols) {
+                let name = elfStringMap[symbol.st_name];
+                if (name) {
+                    symbolNames[name] = symbol;
+                }
+            }
+            console.log(symbolNames);
+            info.symbol=symbolNames;
+        }
+        if(elfSectionMap["DevDscr"]){
+            let dt=elfSectionMap["DevDscr"];
+            let constDataSection = dt.sh_offset;
+            let constDataSize = dt.sh_size;
+            let flashDevice = {
+                Vers: elfHeaderView.getUint16(constDataSection, true),
+                DevName: '',
+                DevType: elfHeaderView.getUint16(constDataSection + 2+128, true),
+                DevAdr: elfHeaderView.getUint32(constDataSection + 4+128, true),
+                szDev: elfHeaderView.getUint32(constDataSection + 8+128, true),
+                szPage: elfHeaderView.getUint32(constDataSection + 12+128, true),
+                Res: elfHeaderView.getUint32(constDataSection + 16+128, true),
+                valEmpty: elfHeaderView.getUint32(constDataSection + 20+128, true),
+                toProg: elfHeaderView.getUint32(constDataSection + 24+128, true),
+                toErase: elfHeaderView.getUint32(constDataSection + 28+128, true),
+                sectors: []
+            };
+
+            for (let i = 0; i < 128; i++) {
+                flashDevice.DevName += String.fromCharCode(elfarray[constDataSection+i+2]);
+            }
+            for (let i = 0; i < 512; i += 8) {
+                let sector = {
+                    szSector: elfHeaderView.getUint32(constDataSection + 32 + 128 + i, true),
+                    AddrSector: elfHeaderView.getUint32(constDataSection + 32 + 128 + i + 4, true)
+                };
+                if(sector.szSector===0xffffffff)break;
+                flashDevice.sectors.push(sector);
+            }
+            //let BLOB_HEADER = [0x00,0xBE,0x0A,0xE0,0x0D,0x78,0x2D,0x06,0x68,0x40,0x08,0x24,0x40,0x00,0x00,0xD3,0x58,0x40,0x64,0x1E,0xFA,0xD1,0x49,0x1C,0x52,0x1E,0x00,0x2A,0xF2,0xD1,0x70,0x47];
+            let BLOB_HEADER = [0x00,0xBE,0x0A,0xE0];
+            let HEADER_SIZE = BLOB_HEADER.length;
+            let Stack_Size = 128;
+            let entry = 0x20000000;
+            flashDevice['Init']         =entry+HEADER_SIZE+symbolNames['Init'       ].st_value;
+            flashDevice['UnInit']       =entry+HEADER_SIZE+symbolNames['UnInit'     ].st_value;
+            flashDevice['EraseChip']    =entry+HEADER_SIZE+symbolNames['EraseChip'  ].st_value;
+            flashDevice['EraseSector']  =entry+HEADER_SIZE+symbolNames['EraseSector'].st_value;
+            flashDevice['ProgramPage']  =entry+HEADER_SIZE+symbolNames['ProgramPage'].st_value;
+            let blobHeaderArray = new Uint8Array(BLOB_HEADER);
+            let romWithBlobHeader = new Uint8Array(rom[0].length + blobHeaderArray.length);
+            romWithBlobHeader.set(blobHeaderArray, 0);
+            romWithBlobHeader.set(rom[0], blobHeaderArray.length);
+            rom[0] = romWithBlobHeader;
+            flashDevice['ROM']=rom[0];
+            flashDevice['RAM']=entry;
+            flashDevice['BUFF']=(entry+rom[0].length+1023)&~1023;
+            flashDevice['BKPT']=entry+1;
+            flashDevice['RSB']=entry+rom[0].length;
+            flashDevice['RSP']=entry+rom[0].length+flashDevice.szPage+Stack_Size;
+            //console.log(flashDevice);
+            return flashDevice;
+        }
+        info.ROM=rom.length>0?rom[0]:null;
+        return info;
+    }
+
+    function hex2bin(hexfile) {
+        let binArray = [];
+        let lines = hexfile.split('\n');
+        for (let line of lines) {
+            if (line.startsWith(':')) {
+                let byteCount = parseInt(line.substring(1, 3), 16);
+                let address = parseInt(line.substring(3, 7), 16);
+                let recordType = parseInt(line.substring(7, 9), 16);
+                if (recordType !== 0) continue; // Skip if record type is not data
+                let data = line.substring(9, 9 + byteCount * 2);
+                let checksum = parseInt(line.substring(9 + byteCount * 2), 16);
+                let sum = (byteCount + (address >> 8) + (address & 0xFF) + parseInt(recordType, 16));
+                checksum=((~checksum&0xff)+1)&0xff;
+                for (let i = 0; i < data.length; i += 2) {
+                    let byte = parseInt(data.substring(i, i + 2), 16);
+                    binArray.push(byte);
+                    sum += byte;
+                }
+                if ((sum & 0xFF) !== checksum) {
+                    console.error('Checksum error on line: ' + line);
+                }
+            }
+        }
+        return binArray;
+    }
+</script>
+
+<script>
+    class DataHelper{
+        constructor(val=null){
+            this.data=val?val:[];
+            this.rpos=0;
+            this.LE=true;
+        }
+        w32(v){
+            if(this.LE){
+                this.data.push((v>>0)&0xff);
+                this.data.push((v>>8)&0xff);
+                this.data.push((v>>16)&0xff);
+                this.data.push((v>>24)&0xff);
+            }
+            else{
+                this.data.push((v>>24)&0xff);
+                this.data.push((v>>16)&0xff);
+                this.data.push((v>>8)&0xff);
+                this.data.push((v>>0)&0xff);
+            }
+            return this;
+        }
+        w16(v){
+            if(this.LE){
+                this.data.push((v>>0)&0xff);
+                this.data.push((v>>8)&0xff);
+            }
+            else{
+                this.data.push((v>>8)&0xff);
+                this.data.push((v>>0)&0xff);
+            }
+            return this;
+        }
+        w8(v){
+            this.data.push(v&0xff);
+            return this;
+        }
+        align(pos){
+            while(this.data.length<pos)this.data.push(0);
+            return this;
+        }
+        wbuff(buff){
+            buff.forEach(e=>this.data.push(e));
+            return this;
+        }
+
+        bytes(){
+            return this.data;
+        }
+
+
+        r8(){
+            return this.data[this.rpos++];
+        }
+        r16(){
+            let v=0;
+            if(this.LE){
+                v=this.data[this.rpos++];
+                v|=this.data[this.rpos++]<<8;
+            }
+            else{
+                v=this.data[this.rpos++]<<8;
+                v|=this.data[this.rpos++];
+            }
+            return v;
+        }
+        r32(){
+            let v=0;
+            if(this.LE){
+                v=this.data[this.rpos++];
+                v|=this.data[this.rpos++]<<8;
+                v|=this.data[this.rpos++]<<16;
+                v|=this.data[this.rpos++]<<24;
+            }
+            else{
+                v=this.data[this.rpos++]<<24;
+                v|=this.data[this.rpos++]<<16;
+                v|=this.data[this.rpos++]<<8;
+                v|=this.data[this.rpos++];
+            }
+            return v;
+        }
+        rbuff(len){
+            let v=[];
+            while(len--)v.push(this.data[this.rpos++]);
+            return v;
+        }
+        rappend(v,len){
+            while(len--)v.push(this.data[this.rpos++]);
+            return v;
+        }
+        rskip(len){
+            this.rpos+=len;
+            return this;
+        }
+        
+    }
+</script>
+<script>
+    class BLEUART{
+        constructor(statschange=null,onrecvdata,filters=0xfff0,readservice=0xfff1,writeservice=0xfff2){
+            if(!('bluetooth' in navigator))return;
+            this.OnstatusChange=statschange?statschange:()=>{};
+            this.OnReceiveData=onrecvdata?onrecvdata:()=>{};
+            
+            this.Sender=null;
+            this.deviceName='';
+            this.device=null;
+            this.connected=false;
+            this.Service=null;
+            this.buffer=[];
+            this.logs=[];
+            this.filters=filters;
+            this.readservice=readservice;
+            this.writeservice=writeservice;
+
+            this.rxFollowTx=true;
+            this.rxReqCount=1;
+            this.rxPromise=null;
+            this.rxPromiseresolve=null;
+            this.rxPromisereject=null;
+            this.rxPromisecallback=null;
+            this.timer=setInterval(() => {
+                if(this.buffer.length>=this.rxReqCount)
+                {
+                    //this.OnReceiveData(this.buffer);
+                    if(this.rxPromise){
+                        if(this.buffer.length>=this.rxReqCount){
+                            const buff=this.buffer.splice(0,this.rxReqCount);
+                            this.rxPromiseresolve(this.rxPromisecallback(buff));
+                            this.rxPromise=null;
+                        }
+                    }
+                }
+            }, 1);
+        }
+        log(obj){
+            this.logs.push(obj.toString());
+        }
+        open(){
+            if(this.connected){
+                this.close();
+                this.connected=false;
+                this.OnstatusChange(this,false);
+                return;
+            }
+            try{
+                navigator.bluetooth.requestDevice({ filters: [{ services: [this.filters] }] })
+                .then(device => {
+                    this.log('Connecting...');
+                    this.deviceName = device.name;
+                    this.device = device;
+                    device.addEventListener('gattserverdisconnected', (event) => {
+                        //connectButton.textContent = '连接蓝牙设备';
+                        this.OnstatusChange(this,false);
+                        this.connected=false;
+                    });
+                    return this.device.gatt.connect();
+                })
+                .then(server => {
+                    this.log('Getting Service...');
+                    return server.getPrimaryService(this.filters);
+                })
+                .then(service => {
+                    this.Service = service;
+                    this.log('Getting Characteristic...');
+                    //return service.requestMtu(250);
+                    return service.getCharacteristic(this.readservice);
+                })
+                .then(characteristic => {
+                    //myCharacteristic = characteristic;
+                    return characteristic.startNotifications().then(_ => {
+                        this.log('> Notifications started');
+                        this.log("Connected to: " + this.deviceName);
+                        characteristic.addEventListener('characteristicvaluechanged',
+                            (event) => {
+                                this.buffer.push(...new Uint8Array(event.target.value.buffer));
+                                if(this.buffer.length>=this.rxReqCount)
+                                {
+                                    this.OnReceiveData(this.buffer);
+                                    if(this.rxPromise){
+                                        if(this.buffer.length>=this.rxReqCount){
+                                            const buff=this.buffer.splice(0,this.rxReqCount);
+                                            this.rxPromiseresolve(this.rxPromisecallback(buff));
+                                            this.rxPromise=null;
+                                        }
+                                    }
+                                }
+                                else
+                                    this.OnReceiveData(this.buffer);
+                            });
+                    });
+                })
+                .then(_ => {
+                    return this.Service.getCharacteristic(this.writeservice);
+                })
+                .then(sender => {
+                    this.log('> get Sender');
+                    this.Sender = sender;
+                    this.OnstatusChange(this,true);
+                    this.connected=true;
+                    //connectButton.textContent = '断开蓝牙设备';
+                })
+                .catch(error => {
+                    this.log('蓝牙连接错误:' + error);
+                });
+            }
+            catch(error){
+                this.log('蓝牙连接错误:' + error);
+            }
+        }
+        close(){
+            try{
+                this.connected=false;
+                this.OnstatusChange(this,false);
+                this.device.gatt.disconnect();
+            }catch(error){
+                this.log(`error:${error.toString()}`);
+            }
+        }
+        sendBytes(v){
+            if(!this.Sender)return;
+            if(this.rxFollowTx)this.rxReqCount=v.length;
+            return this.Sender.writeValue(new Uint8Array(v));
+        }
+        waitBytes(call=()=>{},nbytes=-1){
+            if(nbytes>0)this.rxReqCount=nbytes;
+            if(this.rxPromise)this.rxPromisereject();
+            this.rxPromise = new Promise((resolve, reject) => {
+                this.rxPromiseresolve=resolve;
+                this.rxPromisereject=reject;
+            });
+            this.rxPromisecallback=call;
+            return this.rxPromise;
+        }
+    }
+</script>
+<script>
+    class COMHelper{
+        constructor(statschange,onrecvdata){
+            if(!('serial' in navigator))return;
+            this.OnstatusChange=statschange?statschange:()=>{};
+            this.OnReceiveData=onrecvdata?onrecvdata:()=>{};
+            
+            this.Sender=null;
+            this.deviceName='';
+            this.device=null;
+            this.connected=false;
+            this.isOpen=false;
+            this.buffer=[];
+            this.logs=[];
+            this.COMInfo='';
+            this.COMReader=null;
+            this.COMWriter=null;
+//--------------------------------------------
+//            this.rxEnable=OnRecvString!=null;
+//            this.bytesEnable=OnRecvData!=null;
+//            this.OnRecvString=OnRecvString?OnRecvString:()=>{};
+//            this.OnDataReceive=null;
+//            this.COM=null;
+//            this.buffer=[];
+//            this.rxCache=[];
+//            this.IdleTime=0;
+//-------------------------------------------
+            this.rxFollowTx=true;
+            this.rxReqCount=1;
+            this.rxPromise=null;
+            this.rxPromiseresolve=null;
+            this.rxPromisereject=null;
+            this.rxPromisecallback=null;
+            this.timer=setInterval(() => {
+                if(this.buffer.length>=this.rxReqCount)
+                {
+                    //this.OnReceiveData(this.buffer);
+                    if(this.rxPromise){
+                        if(this.buffer.length>=this.rxReqCount){
+                            const buff=this.buffer.splice(0,this.rxReqCount);
+                            this.rxPromiseresolve(this.rxPromisecallback(buff));
+                            this.rxPromise=null;
+                        }
+                    }
+                }
+            }, 1);
+        }
+        log(obj){
+            this.logs.push(obj.toString());
+        }
+        async portSelect(){
+            await navigator.serial
+            .requestPort()
+            .then((port) => {
+                this.COM=port;
+                this.COMInfo=JSON.stringify(port.getInfo());
+            })
+            .catch((e) => {
+                this.COM=null;
+                console.log(e);
+                // The user didn't select a port.
+            });
+        }
+        async open(baudRate=115200,partiy='none',databits=8,stopbits=1){
+            if(this.isOpen){
+                try {
+                    this.COMReader.releaseLock();
+                    this.COMWriter.releaseLock();
+                    await this.COM.close();
+                    //await COMReader.cancel();
+                } catch (e) {
+                    console.log(e);
+                    return false;
+                    //TODO handle the exception
+                }
+                this.buffer=[];
+                this.isOpen=false;
+                this.OnstatusChange(this,this.isOpen);
+                return false;
+            }
+            else{
+                await this.portSelect();
+                if(this.COM==null){
+                    console.log("打开串口失败");
+                    return false;
+                }
+            }
+            //配置串口信息
+            let cfg={
+                baudRate: baudRate,
+                parity: partiy,
+                dataBits: databits,
+                stopBits:stopbits,
+            }
+            console.log(cfg);
+            try{
+                await this.COM.open(cfg);
+            }catch(e){
+                console.log("打开串口失败");
+                this.OnstatusChange(this,this.isOpen);
+                return false;
+            }
+            this.COMReader = this.COM.readable.getReader();
+            this.COMWriter = this.COM.writable.getWriter();
+            
+            if(this.COMReader!=null){
+                this.isOpen=true;
+                this.OnstatusChange(this,this.isOpen);
+            }
+
+            try {
+                while (this.isOpen) {
+                    const { value, done } = await this.COMReader.read();
+                    if (done) {
+                        this.COMReader.releaseLock();
+                        break;
+                    }
+                    
+                    if (value) {
+                        this.buffer.push(...new Uint8Array(value.buffer));
+                        if(this.buffer.length>=this.rxReqCount)
+                        {
+                            this.OnReceiveData(this.buffer);
+                            if(this.rxPromise){
+                                const buff=this.buffer.splice(0,this.rxReqCount);
+                                this.rxPromiseresolve(this.rxPromisecallback(buff));
+                                this.rxPromise=null;
+                            }
+                        }
+                        else
+                            this.OnReceiveData(this.buffer);
+                    }
+                }
+            } catch (e) {
+                console.log(e);
+                // Handle |error|...
+            } finally {
+                this.COMReader.releaseLock();
+                this.COMWriter.releaseLock();
+                this.isOpen=false;
+                this.OnstatusChange(this,this.isOpen);
+                if(this.rxPromise){
+                    this.rxPromisereject();
+                    this.rxPromise=null;
+                }
+            }
+            return this.isOpen;
+        }
+        close(){
+            try{
+                this.isOpen=false;
+                this.OnstatusChange(this,this.isOpen);
+                this.COMReader.releaseLock();
+                this.COMWriter.releaseLock();
+                this.COM.close();
+            }catch(error){
+                log(`error:${error.toString()}`);
+            }
+        }
+        sendBytes(v){
+            if(!this.isOpen)return;
+            if(this.rxFollowTx)this.rxReqCount=v.length;
+            return Promise.resolve().then(e=>this.COMWriter.write(Uint8Array.from(v)));
+        }
+        waitBytes(call=()=>{},nbytes=-1){
+            if(nbytes>0)this.rxReqCount=nbytes;
+            if(this.rxPromise)this.rxPromisereject();
+            this.rxPromise = new Promise((resolve, reject) => {
+                this.rxPromiseresolve=resolve;
+                this.rxPromisereject=reject;
+            });
+            this.rxPromisecallback=call;
+            return this.rxPromise;
+        }
+    }
+</script>
+<script>
+    class UARTSWDDevice{
+        constructor(COM){
+            this.COM=COM;
+            this.data=[];
+            this.Parity=0;
+            this.rate=0xfc;
+
+            this.lastInt=0;
+            this.lastData=[];
+
+            this.rcache=[];
+            this.wcache=[];
+            this.coreID=0;
+            this.transRate=0;
+            this.packetsize=4;
+            for (let i = 0; i < 46; i++) {
+                this.rcache.push(255);
+                this.wcache.push(255);
+            }
+            this.brInt=(r)=>{
+                for (let i = 0; i < 8; i++) {
+                    if (r & 1) this.rcache[i]=0xff;
+                    else this.rcache[i]=0xf0;
+                    r >>= 1;
+                }
+                return this.rcache;
+            }
+            this.rInt=(r)=>{
+                return this.COM.sendBytes(this.brInt(r));
+            }
+            this.bwInt=(r,v)=>{
+                for (let i = 0; i < 8; i++) {
+                    if (r & 1) this.wcache[i]=0xff;
+                    else this.wcache[i]=0xf0;
+                    r >>= 1;
+                }
+                let addr = 0;
+                for (let i = 13; i < 45; i++) {
+                    if (v & 1) this.wcache[i]=0xff;
+                    else this.wcache[i]=0xf0;
+                    addr += v;
+                    v >>>= 1;
+                }
+                this.wcache[45] = (addr&1) ? 0xff : 0xf0;
+                return this.wcache;
+            }
+            this.wInt=(r,v)=>{
+                return this.COM.sendBytes(this.bwInt(r,v));
+            }
+        }
+        w8(v, data) {
+            data = data ? data : this.data;
+            for (let i = 0; i < 8; i++) {
+                if (v & 1) data.push(255);
+                else data.push(240);
+                v >>= 1;
+            }
+        }
+        w32(v, data) {
+            data = data ? data : this.data;
+            let addr = 0;
+            for (let i = 0; i < 32; i++) {
+                if (v & 1) data.push(255);
+                else data.push(240);
+                addr += v;
+                v >>>= 1;
+            }
+            return addr;
+        }
+
+        rst(){
+            this.COM.buffer.length=0;
+            this.data.length=0;
+            this.w32(0xffffffff);
+            this.w32(0xffffffff);
+            this.w8(0x9e);
+            this.w8(0xe7);
+            this.w32(0xffffffff);
+            this.w32(0xffffffff);
+            this.data.push(...[0xf0, 0xf0]);
+            this.w8(0xa5);
+            this.data.push(...[255, 255, 255]);
+            this.w32(0xffffffff);
+            this.data.push(...[255, 255, 255]);
+            return this.COM.sendBytes(this.data)
+            .then(e=>this.COM.waitBytes((b)=>(this.lastInt=this.readInt(b))));
+        }
+
+        wBus(addr,value){
+            return this.wInt(addr,value)
+            .then(e=>this.COM.waitBytes((b)=>(this.lastInt=this.readInt(this.lastData=b))));
+        }
+
+        rBus(addr){
+            return this.rInt(addr)
+            .then(e=>this.COM.waitBytes((b)=>(this.lastInt=this.readInt(this.lastData=b))));
+        }
+
+        WriteData(addr,data){
+            this.data.length=0;
+            this.data.push(...this.bwInt(0x8b,addr));
+            this.data.push(...this.bwInt(0xbb,data));
+            this.data.push(...this.brInt(0xbd));
+            return this.COM.sendBytes(this.data)
+            .then(e=>this.COM.waitBytes((b)=>null));
+        }
+
+        ReadData(addr){
+            this.data.length=0;
+            this.data.push(...this.bwInt(0x8b,addr));
+            this.data.push(...this.brInt(0x9f));
+            this.data.push(...this.brInt(0xbd));
+            return this.COM.sendBytes(this.data)
+            .then(e=>this.COM.waitBytes((b)=>(this.lastInt=this.readInt(this.lastData=b))));
+        }
+
+        Go(){
+            return this.WriteData(0xE000EDF0,0xA05F0001);
+        }
+
+        Halt(){
+            return this.WriteData(0xE000EDF0,0xA05F0003);
+        }
+
+        isHalt(){
+            return this.ReadData(0xE000EDF0)
+            .then(e=>((e&0x00020000)!=0));
+        }
+
+        WriteReg(reg,value){
+            return this.WriteData(0xE000EDF8,value)
+            .then(e=>this.WriteData(0xE000EDF4,reg|0x10000))
+        }
+
+        Reset(){
+            return this.wBus(0x81,0x1e);
+        }
+
+        ReadReg(reg){
+            return this.WriteData(0xE000EDF4,reg)
+            .then(e=>this.ReadData(0xE000EDF8))
+        }
+
+        connect(){
+            return this.rst()
+            .then(e=>{
+                this.coreID=e;
+                this.rate = (this.lastData[190]<252||this.lastData[189]<252) && 248 || 252;
+                console.log(`CoreID: ${Hex32(e)} Rate: ${this.rate}`);
+                
+                return this.wBus(0x81,0x1e)})
+            .then(e=>this.wBus(0xb1,0))
+            .then(e=>this.wBus(0xA9,0x50000000))
+            .then(e=>this.rBus(0x8D))
+            .then(e=>this.rBus(0x8D))
+            .then(e=>this.rBus(0x8D))
+            .then(e=>this.wBus(0xb1,0))
+            .then(e=>this.wBus(0xa3,0x23000012))
+            .then(e=>this.rBus(0x8D))
+            .then(e=>this.Go())
+        }
+
+        softReset(){
+            this.COM.buffer.length=0;
+            return this.Halt()
+            .then(e=>this.WriteData(0xE000EDFC,1))
+            .then(e=>this.ReadData(0xE000EDF0))
+            .then(e=>this.WriteData(0xE000ED0C,0x05fa0004))
+            .then(e=>this.WriteReg(16,0x01000000))
+            .then(e=>this.WriteData(0xE000EDFC,(1 << 24)))
+        }
+
+        writeMem32(addr,data){
+            let r=new DataHelper(data);
+            let len=(data.length+3)>>>2;
+            return this.wBus(0x8B,addr)
+            .then(e=>{
+                if(this.packetsize>0){
+                    let write=()=>{
+                        if(r.rpos<r.data.length){
+                            this.data.length=0;
+                            this.data.push(...this.bwInt(0xBB,r.r32()));
+                            if(r.rpos<r.data.length&&this.packetsize>1)this.data.push(...this.bwInt(0xBB,r.r32()));
+                            if(r.rpos<r.data.length&&this.packetsize>2)this.data.push(...this.bwInt(0xBB,r.r32()));
+                            if(r.rpos<r.data.length&&this.packetsize>3)this.data.push(...this.bwInt(0xBB,r.r32()));
+                            if(r.rpos<r.data.length&&this.packetsize>4)this.data.push(...this.bwInt(0xBB,r.r32()));
+                            if(r.rpos<r.data.length&&this.packetsize>5)this.data.push(...this.bwInt(0xBB,r.r32()));
+                            if(r.rpos<r.data.length&&this.packetsize>6)this.data.push(...this.bwInt(0xBB,r.r32()));
+                            //console.log(`rpos:${r.rpos} : size:${this.data.length}`);
+                            this.transRate=r.rpos/r.data.length;
+                            return this.COM.sendBytes(this.data).then(_=>write());
+                        }
+                        return null;
+                    }
+                    return write();
+                }
+                else{
+                    this.data.length=0;
+                    for (let i = 0; i < len; i++)
+                        this.data.push(...this.bwInt(0xBB,r.r32()));
+                    return this.COM.sendBytes(this.data);
+                }
+            })
+            .then(e=>this.COM.waitBytes(()=>{},len*46))
+            .then(e=>this.rBus(0xBD))
+            .then(e=>{COM.buffer.length=0;});
+        }
+
+        readMem32(addr,length){
+            this.COM.buffer.length=0;
+            let len=(length+3)>>>2;
+            return this.wBus(0x8B,addr)
+            .then(e=>this.rBus(0x9F))
+            .then(e=>{
+                this.COM.buffer.length=0;
+                let bytes=this.brInt(0x9F);
+                if(this.packetsize>0){
+                    let count=0;
+                    let read=()=>{
+                        if(count<len){
+                            this.data.length=0;
+                            this.data.push(...bytes);count++;
+                            if(count<len&&this.packetsize>1){this.data.push(...bytes);count++;}
+                            if(count<len&&this.packetsize>2){this.data.push(...bytes);count++;}
+                            if(count<len&&this.packetsize>3){this.data.push(...bytes);count++;}
+                            if(count<len&&this.packetsize>4){this.data.push(...bytes);count++;}
+                            if(count<len&&this.packetsize>5){this.data.push(...bytes);count++;}
+                            if(count<len&&this.packetsize>6){this.data.push(...bytes);count++;}
+                            this.transRate=count/len;
+                            //console.log(`rpos:${count} : ${len}`);
+                            return this.COM.sendBytes(this.data).then(_=>read());
+                        }
+                        return null;
+                    }
+                    return read();
+                }
+                else{
+                    this.data.length=0;
+                    for (let i = 0; i < len; i++)
+                        this.data.push(...bytes);
+                    return this.COM.sendBytes(this.data);
+                }
+            })
+            .then(e=>{
+                return this.COM.waitBytes((b)=>{let v=this.readInts(b,len);this.COM.buffer.length=0;return v;},len*46);
+            })
+        }
+
+
+        async AllReg(){
+            let regs=[];
+            for (let i = 0; i < 21; i++) {
+                let val= await this.ReadReg(i);
+                regs.push(val);
+            }
+            return regs;
+        }
+
+        async viewregs(){
+            let str=[];
+            for (let i = 0; i < 17; i++) {
+                let v=await this.ReadReg(i);
+                if(i<13){
+                    let r=`R`+i;
+                    if(i<10)r+=' '
+                    str.push(`${r} = 0x${Hex32(v)}\r\n`);
+                }
+                else{
+                    switch(i){
+                        case 13:str.push(`SP  = 0x${Hex32(v)}\r\n`);break;
+                        case 14:str.push(`LR  = 0x${Hex32(v)}\r\n`);break;
+                        case 15:str.push(`PC  = 0x${Hex32(v)}\r\n`);break;
+                        case 16:str.push(`xPSR= 0x${Hex32(v)}\r\n`);break;
+                    }
+                }
+            }
+            return str.join('');
+        }
+
+        readInt(data) {
+            if (data.length < 35) return;
+            let index = data.length - 35;
+            let value = 0;
+            const r=this.rate;
+            for (let i = 0; i < 32; i++) {
+                value >>>= 1;
+                if (data[index + i] > r) value |= 0x80000000;
+            }
+            return value;
+        }
+
+        readInts(data,len){
+            if(data.length<46*len)return;
+            let index=data.length-35;
+            let vals=[];
+            for (let j = 0; j < len; j++) {
+                let value=0;
+                for(let i=0;i<32;i++){
+                    value>>>=1;
+                    if(data[index+i]>this.rate)value|=0x80000000;
+                }
+                index-=46;
+                vals.unshift(value);
+            }
+            return vals;
+        }
+
+    }
+
+    class STLINK{
+        constructor(){
+            this.OnstatusChange=()=>{};
+            this.CMD=()=>{};
+            this.stlink=null;
+            this.VCC=0;
+            this.CoreID=0;
+            this.REG=[];
+            this.SPEED={
+                SWC_4MHZ : 0,
+                SWC_1P8MHZ_DIVISOR : 1,
+                SWC_1P2MHZ_DIVISOR : 2,
+                SWC_950KHZ_DIVISOR : 3,
+                SWC_480KHZ_DIVISOR : 7,
+                SWC_240KHZ_DIVISOR : 15,
+                SWC_125KHZ_DIVISOR : 31,
+                SWC_100KHZ_DIVISOR : 40,
+                SWC_50KHZ_DIVISOR : 79,
+                SWC_25KHZ_DIVISOR : 158,
+                SWC_15KHZ_DIVISOR : 265,
+                SWC_5KHZ_DIVISOR : 798,
+            };
+            this.connected=false;
+            this.coreID=-1;
+        }
+        open(){
+            if(this.connected){
+                this.connected=false;
+                this.OnstatusChange(this,this.connected);
+                this.stlink.close();
+                return;
+            }
+            return navigator.usb
+            .requestDevice({ filters: [{ vendorId: 0x0483 }] })
+            .then((device) => {
+                this.stlink=device;
+                console.log(device.productName); // "Arduino Micro"
+                console.log(device.manufacturerName); // "Arduino LLC"
+                //device.addEventListener('disconnect', () => {
+                //    this.connected=false;
+                //    this.OnstatusChange(this,this.connected);
+                //});
+                return device.open();
+            })
+            .then(()=>{
+                return this.stlink.claimInterface(0);
+            })
+            .then(()=>{
+                this.connected=true;
+                this.OnstatusChange(this,this.connected);
+                this.CMD=function(len,Cmds){
+                    let u8=new Uint8Array(Cmds);
+                    return this.stlink.transferOut(0x02,u8).then(()=>{
+                        if(len>0)
+                            return this.stlink.transferIn(1,len);
+                        else
+                            return null;
+                    })
+                    .then(e=>{
+                        if(e!=null)
+                            return e.data;//return new Uint8Array(e.data.buffer);
+                    })
+                }
+            })
+            .catch((error) => {
+                console.error(error);
+            });
+        }
+
+        async getMode(){
+            let r=await this.CMD(2,[0xf5]);
+            return r.getUint8();
+        }
+
+        async exitDFU(){
+            if(await this.getMode()==0)
+                await this.CMD(0,[0xf3,0x07]);
+            return true;
+        }
+
+        async SWDMode(){
+            await this.CMD(2,[0xf2,0x30,0xa3]);
+            return true;
+        }
+
+        async SWDSpeed(speed){
+            await this.CMD(2,new DataHelper([0xf2,0x43]).w16(speed).bytes());
+            return true;
+        }
+
+        async getCoreID(){
+            let r=await this.CMD(4,[0xf2,0x22])
+            return (this.coreID=r.getUint32(0,true));
+        }
+        
+        async getVoltage(){
+            let r=await this.CMD(8,[0xf7])
+            return (2400*r.getUint32(4,true)/r.getUint32(0,true))|0;
+        }
+
+        
+
+        async Reset(){
+            await this.CMD(2,[0xf2,0x32])
+            return true;
+        }
+
+        async HardWareReset(){
+            await this.CMD(2,[0xf2,0x3c,2])
+            return true;
+        }
+
+
+        async WriteData(addr,data){
+            let r=await this.CMD(2,new DataHelper([0xf2,0x35]).w32(addr).w32(data).bytes());
+            if(r.getUint8(0,true)!=0x80)this.Reset();
+            return r!=null;
+        }
+        async ReadData(addr){
+            let r=await this.CMD(8,new DataHelper([0xf2,0x36]).w32(addr).w32(0).bytes());
+            //let r=await this.stlink.transferIn(1,8);
+            if(r.getUint8(0,true)!=0x80)this.Reset();
+            return r.getUint32(4,true);
+        }
+
+        async Go(){
+            return await this.WriteData(0xE000EDF0,0xA05F0001);
+        }
+
+        async Halt(){
+            return await this.WriteData(0xE000EDF0,0xA05F0003);
+        }
+
+        async isHalt(){
+            let r=await this.ReadData(0xE000EDF0);
+            return (r&0x00020000)!=0;
+        }
+
+        async writeMem32(addr,data){
+            //let len=(((data.length+3)/4)|0)<<2;
+            //while(data.length<len)data.push(0xff);
+            await this.CMD(0,new DataHelper([0xf2,0x08]).w32(addr).w16(data.length).bytes());
+            let r=await this.stlink.transferOut(0x02,new Uint8Array(data));
+            await this.ReadStats();
+            return r!=null;
+        }
+
+        async readMem32(addr,len){
+            await this.CMD(0,new DataHelper([0xf2,0x07]).w32(addr).w16(len).bytes());
+            let r=await this.stlink.transferIn(1,len);
+            //await this.ReadStats();
+            return new Uint32Array(r.data.buffer);
+        }
+
+        async ReadStats(){
+            let regs=await this.CMD(12,[0xf2,0x3e]);
+            return new Uint32Array(regs.buffer);
+        }
+
+        async ReadRegs(){
+            let regs=await this.CMD(88,[0xf2,0x3a]);
+            return new Uint32Array(regs.buffer);
+        }
+
+        async ReadReg(index){
+            let r=await this.CMD(8,[0xf2,0x33,index&0x1f,0,0,0,0,0]);
+            return r.getUint32(4,true);
+        }
+
+        async WriteReg(index,data){
+            let r=await this.CMD(2,new DataHelper([0xf2,0x34,index&0x1f]).w32(data).bytes());
+            return r!=null;
+        }
+
+        delayms(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+        async softReset(){
+            await this.Halt();
+            await this.WriteData(0xE000EDFC,1);
+            //let r=await this.ReadData(0xE000EDF0);
+            await this.WriteData(0xE000ED0C,0x05fa0004);
+            await this.delayms(10);
+            await this.WriteReg(16,0x01000000);
+            await this.WriteData(0xE000EDFC, (1 << 24));
+            return true;
+        }
+
+        async connect(){
+            //await this.Init();
+            //await this.getMode();
+            //await new Promise(resolve => setTimeout(resolve, 2));
+            await this.Reset();
+            //await this.Reset();
+            await this.getMode();
+            await this.exitDFU();
+            await this.getMode();
+            await this.SWDMode();
+            await this.getMode();
+            await this.SWDSpeed(this.SPEED.SWC_4MHZ);
+            this.VCC=await this.getVoltage();
+            console.log(`${(this.VCC/1000).toFixed(2)}V`);
+            this.CoreID=await this.getCoreID();
+            console.log(`0x${toHex32(this.CoreID)}`);
+            //let h=await this.ReadData(0xE000EDF0);
+            //console.log(`0x${toHex32(h)}`);
+            let regs=await this.ReadRegs();
+            if((regs[0]&0xff)==0x80){
+                for (let i = 0; i < regs.length-1; i++) {
+                    this.REG[i]=regs[i+1];
+                }
+            }
+            
+            return this.CoreID;
+        }
+    }
+
+
+    function toHex(v) {
+        let hex;
+        if ((v & 0xf) < 10) hex = String.fromCharCode(48 + (v & 0xf));
+        else hex = String.fromCharCode(65 + (v & 0xf) - 10);
+        v >>>= 4;
+        if ((v & 0xf) < 10) hex = String.fromCharCode(48 + (v & 0xf)) + hex;
+        else hex = String.fromCharCode(65 + (v & 0xf) - 10) + hex;
+        return hex;
+    }
+    function toHex32(v) {
+        return toHex((v >>> 24) & 0xff) + toHex((v >>> 16) & 0xff) + toHex((v >>> 8) & 0xff) + toHex(v & 0xff);
+    }
+    function padHex(value) {
+        return ('00' + value.toString(16).toUpperCase()).slice(-2);
+    }
+    function Hex8(value) {
+        return ('0' + (value&0xff).toString(16).toUpperCase()).slice(-2);
+    }
+    function Hex16(value) {
+        return ('000' + (value&0xffff).toString(16).toUpperCase()).slice(-4);
+    }
+    function Hex32(value) {
+        return Hex16((value>>>16))+Hex16(value);
+    }
+
+    function u32t8(uint32){
+        uint32 = Array.isArray(uint32)?new Uint32Array(uint32):uint32;
+        let u8Array = new Uint8Array(uint32.length * 4);
+        for (let i = 0; i < uint32.length; i++) {
+            u8Array[i * 4] = uint32[i] & 0xFF;
+            u8Array[i * 4 + 1] = (uint32[i] >> 8) & 0xFF;
+            u8Array[i * 4 + 2] = (uint32[i] >> 16) & 0xFF;
+            u8Array[i * 4 + 3] = (uint32[i] >> 24) & 0xFF;
+        }
+        return u8Array;
+    }
+
+    function viewhex(array,hex=true){
+        let str=[];
+        str.push('HEX   |')
+        for (let i = 0; i < 16; i++) {
+            str.push(hex && `${toHex(i&0xff)} ` || `${i.toString().padStart(2, '0')} `);
+        }
+        let newline=true;
+        let lineindex=0;
+        for (let i = 0; i < array.length; i++) {
+            
+            if(i%16==0){
+                newline=true;
+            }
+            if(newline){
+                newline=false;
+                let it=hex && (toHex((i>>>8)&0xff)+toHex(i&0xff)) || (''+i);
+                while(it.length<5)it+=' ';
+                str.push(`\r\n${it} |`);
+            }
+            str.push(`${toHex(array[i]&0xff)} `);
+        }
+        return str.join('');
+    }
+</script>
+
+<script>
+    var bootpy32=[
+    0x10,0x08,0x00,0x20,0xE9,0x00,0x00,0x20,0xF1,0x00,0x00,0x20,0xF3,0x00,0x00,0x20,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xF5,0x00,0x00,0x20,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xF7,0x00,0x00,0x20,0xF9,0x00,0x00,0x20,
+    0xFB,0x00,0x00,0x20,0xFB,0x00,0x00,0x20,0xFB,0x00,0x00,0x20,0xFB,0x00,0x00,0x20,
+    0xFB,0x00,0x00,0x20,0xFB,0x00,0x00,0x20,0xFB,0x00,0x00,0x20,0xFB,0x00,0x00,0x20,
+    0x00,0x00,0x00,0x00,0xFB,0x00,0x00,0x20,0xFB,0x00,0x00,0x20,0x00,0x00,0x00,0x00,
+    0xFB,0x00,0x00,0x20,0xFB,0x00,0x00,0x20,0xFB,0x00,0x00,0x20,0x00,0x00,0x00,0x00,
+    0xFB,0x00,0x00,0x20,0xFB,0x00,0x00,0x20,0x00,0x00,0x00,0x00,0xFB,0x00,0x00,0x20,
+    0x00,0x00,0x00,0x00,0xFB,0x00,0x00,0x20,0xFB,0x00,0x00,0x20,0xFB,0x00,0x00,0x20,
+    0x00,0x00,0x00,0x00,0xFB,0x00,0x00,0x20,0x00,0x00,0x00,0x00,0xFB,0x00,0x00,0x20,
+    0xFB,0x00,0x00,0x20,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x03,0x48,0x85,0x46,0x00,0xF0,0x1E,0xF8,0x00,0x48,0x00,0x47,0x81,0x01,0x00,0x20,
+    0x10,0x08,0x00,0x20,0x02,0x49,0x03,0x4A,0x08,0x68,0x10,0x40,0xFC,0xD0,0x70,0x47,
+    0x00,0x06,0x00,0x20,0x0F,0x00,0x00,0x00,0x04,0x48,0x80,0x47,0x04,0x48,0x00,0x47,
+    0xFE,0xE7,0xFE,0xE7,0xFE,0xE7,0xFE,0xE7,0xFE,0xE7,0xFE,0xE7,0x29,0x01,0x00,0x20,
+    0xC1,0x00,0x00,0x20,0x06,0x4C,0x01,0x25,0x06,0x4E,0x05,0xE0,0xE3,0x68,0x07,0xCC,
+    0x2B,0x43,0x0C,0x3C,0x98,0x47,0x10,0x34,0xB4,0x42,0xF7,0xD3,0xFF,0xF7,0xD4,0xFF,
+    0x24,0x03,0x00,0x20,0x44,0x03,0x00,0x20,0x70,0x47,0x30,0xB4,0x74,0x46,0x64,0x1E,
+    0x25,0x78,0x64,0x1C,0xAB,0x42,0x00,0xD2,0x1D,0x46,0x63,0x5D,0x5B,0x00,0xE3,0x18,
+    0x30,0xBC,0x18,0x47,0x02,0xE0,0x08,0xC8,0x12,0x1F,0x08,0xC1,0x00,0x2A,0xFA,0xD1,
+    0x70,0x47,0x70,0x47,0x00,0x20,0x01,0xE0,0x01,0xC1,0x12,0x1F,0x00,0x2A,0xFB,0xD1,
+    0x70,0x47,0x00,0x00,0x05,0x49,0x00,0x20,0x82,0x00,0x53,0x18,0x8A,0x58,0x5B,0x68,
+    0x13,0x60,0x80,0x1C,0xC0,0xB2,0x02,0x28,0xF6,0xD3,0x70,0x47,0x1C,0x03,0x00,0x20,
+    0xFF,0xF7,0xF0,0xFF,0x5E,0x4C,0x5D,0x48,0xA0,0x60,0x5E,0x48,0xA0,0x60,0x5E,0x48,
+    0xE0,0x60,0x5E,0x48,0xE0,0x60,0x5E,0x4D,0x00,0x26,0x5E,0x4F,0x6E,0x60,0xFF,0xF7,
+    0x99,0xFF,0x03,0x00,0xFF,0xF7,0xC1,0xFF,0x07,0x05,0x06,0x14,0x60,0x75,0x8E,0x05,
+    0xA8,0x00,0xF4,0xE7,0x00,0x20,0x31,0x46,0xAE,0x60,0xC2,0xB2,0x3A,0x54,0x40,0x1C,
+    0x51,0x18,0x80,0xB2,0xFF,0x28,0xF8,0xD9,0xA9,0x60,0x80,0x20,0x28,0x60,0xE6,0xE7,
+    0x39,0x78,0x01,0x20,0x3A,0x5C,0x51,0x18,0x40,0x1C,0x00,0x06,0x89,0xB2,0x00,0x0E,
+    0xF8,0xD1,0xA8,0x68,0x81,0x42,0x01,0xD0,0x40,0x20,0xEF,0xE7,0x01,0x20,0xE9,0x68,
+    0xC0,0x06,0x08,0x18,0x21,0x69,0xC9,0x03,0xFC,0xD4,0x61,0x69,0x46,0x4A,0x11,0x43,
+    0x61,0x61,0x00,0x21,0x52,0x11,0x04,0xE0,0x1F,0x29,0x02,0xD1,0x63,0x69,0x13,0x43,
+    0x63,0x61,0x8B,0x00,0xFB,0x58,0x08,0xC0,0x49,0x1C,0x89,0xB2,0x20,0x29,0xF3,0xD3,
+    0x21,0x69,0xC9,0x03,0xFC,0xD4,0x21,0x69,0x01,0x23,0x19,0x43,0x21,0x61,0x61,0x69,
+    0x39,0x4B,0x19,0x43,0x61,0x61,0x20,0x21,0x04,0xE0,0x3F,0x29,0x02,0xD1,0x63,0x69,
+    0x13,0x43,0x63,0x61,0x8B,0x00,0xFB,0x58,0x08,0xC0,0x49,0x1C,0x89,0xB2,0x40,0x29,
+    0xF3,0xD3,0x20,0x69,0xC0,0x03,0xFC,0xD4,0x20,0x69,0x01,0x21,0x08,0x43,0x20,0x61,
+    0x60,0x69,0x88,0x43,0x60,0x61,0xB0,0xE7,0x61,0x69,0x04,0x20,0x01,0x43,0x61,0x61,
+    0x61,0x69,0x82,0x05,0x11,0x43,0x61,0x61,0x41,0x06,0x0E,0x60,0x21,0x69,0xC9,0x03,
+    0xFC,0xD4,0x21,0x69,0x01,0x22,0x11,0x43,0x21,0x61,0x61,0x69,0x81,0x43,0x61,0x61,
+    0x9B,0xE7,0x20,0x69,0xC0,0x03,0xFC,0xD4,0x20,0x69,0x01,0x22,0x10,0x43,0x20,0x61,
+    0x20,0x6A,0xFF,0x21,0x08,0x43,0x20,0x62,0x60,0x69,0x51,0x04,0x08,0x43,0x60,0x61,
+    0x13,0x48,0x80,0x30,0x06,0x60,0x20,0x69,0xC0,0x03,0xFC,0xD4,0x20,0x69,0x10,0x43,
+    0x20,0x61,0x82,0xE7,0x20,0x69,0xC0,0x03,0xFC,0xD4,0x21,0x69,0x01,0x20,0x01,0x43,
+    0x21,0x61,0x21,0x6A,0x09,0x0A,0x09,0x02,0xAA,0x31,0x21,0x62,0x61,0x69,0x42,0x04,
+    0x11,0x43,0x61,0x61,0x06,0x49,0x80,0x31,0x0E,0x60,0x21,0x69,0xC9,0x03,0xFC,0xD4,
+    0x21,0x69,0x01,0x43,0x21,0x61,0x68,0xE7,0x2E,0x60,0x50,0xE7,0x23,0x01,0x67,0x45,
+    0x00,0x20,0x02,0x40,0xAB,0x89,0xEF,0xCD,0x3B,0x2A,0x19,0x08,0x7F,0x6E,0x5D,0x4C,
+    0x00,0x06,0x00,0x20,0x10,0x06,0x00,0x20,0x01,0x00,0x00,0x01,0x04,0x10,0x02,0x40,
+    0xFF,0x90,0xFF,0x00,0x44,0x03,0x00,0x20,0x00,0x06,0x00,0x20,0x10,0x00,0x00,0x00,
+    0x44,0x01,0x00,0x20,0x54,0x03,0x00,0x20,0x10,0x06,0x00,0x20,0x00,0x02,0x00,0x00,
+    0x54,0x01,0x00,0x20,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,
+    ];
+
+    async function downloadbin(bin,bootloader=bootpy32) {
+        if(!bin)return;
+        const ADDR_STAS= 0x20000600;
+        const ADDR_XOR = 0x20000604;
+        const ADDR_SUM = 0x20000608;
+        const ADDR_ADDR= 0x2000060C;
+        const ADDR_DATA= 0x20000610;
+
+        await SWD.connect()
+        .then(e=>SWD.connect())
+        .then(e=>SWD.softReset())
+        //.then(e=>delay(10))
+        //.then(e=>SWD.softReset())
+        .then(e=>SWD.WriteReg(15,0x20000000))
+        //.then(e=>SWD.ReadReg(15)).then(e=>console.log(Hex32(e)))        
+        .then(e=>SWD.writeMem32(0x20000000,bootloader))
+        //.then(e=>SWD.readMem32(0x20000000,bootloader.length))
+        //.then(e=>{
+        //    const b=u32t8(e);
+        //    console.log(viewhex(b));
+        //    
+        //    for(let i=0;i<bootloader.length;i++)if(bootloader[i]-b[i])console.log(`error:${i}`);
+        //})
+        //.then(e=>SWD.ReadReg(15)).then(e=>console.log(Hex32(e)))
+        .then(e=>SWD.WriteData(0xE000ED08,0x20000000))
+        //.then(e=>SWD.Reset())
+        //.then(e=>SWD.ReadReg(15)).then(e=>console.log(Hex32(e)))
+        .then(e=>SWD.Go())
+        .then(e=>SWD.WriteData(ADDR_ADDR,0xffffffff))
+        .then(e=>SWD.WriteData(ADDR_STAS,3))
+        .then(e=>delay(10))
+        .then(e=>SWD.Halt())
+        .then(e=>SWD.ReadReg(15)).then(e=>console.log(Hex32(e)))
+        .then(e=>SWD.Go())
+        for (let i = 0; i < 128; i++) {
+            let sta=await SWD.ReadData(ADDR_STAS);
+            console.log(`i:${i} sta:${sta}`);
+            if(sta==0x80)break;
+            if(i==127)return;
+        }
+        let count=bin.length;
+        let binsize=bin.length;
+        let index=0;
+        let packetsize=0;
+        console.log(`count:${count}`);
+        setUploadRate(0);
+        let timer=setInterval(() => {
+            setUploadRate((index+(SWD.transRate*256))/binsize);
+        }, 100);
+        while(count){
+            let chunkSize = count>=256?256:count;
+            let chunk = bin.slice(0, chunkSize);
+            bin = bin.slice(chunkSize);
+            count -= chunkSize;
+            let sum=0;
+            if (chunk.length<256){
+                if(!Array.isArray(chunk)){
+                    let carr=[];
+                    carr.push(...chunk);
+                    chunk=carr;
+                }
+                while(chunk.length < 256)chunk.push(0xFF);
+            }
+            for(let i = 0; i < chunk.length; i++) {
+                sum += chunk[i];
+            }
+            console.log(`count:${count} chunk:${chunk.length} index:${index}`);
+            await SWD.writeMem32(ADDR_DATA, chunk)
+            .then(e=>SWD.WriteData(ADDR_SUM,sum))
+            .then(e=>SWD.WriteData(ADDR_ADDR,index))
+            .then(e=>SWD.WriteData(ADDR_STAS,2))
+            for (let i = 0; i < 128; i++) {
+                await delay(1);
+                let sta=await SWD.ReadData(ADDR_STAS);
+                //console.log(`i:${i} sta:${sta}`);
+                if(sta==0x80)break;
+                if(i==127){
+                    clearInterval(timer);
+                    return;
+                }
+            }
+            SWD.transRate=0;
+            index+=chunkSize;
+        }
+        clearInterval(timer);
+        setUploadRate(-1);
+        await SWD.connect()
+        .then(e=>SWD.connect())
+        .then(e=>SWD.softReset())
+        .then(e=>delay(50))
+        .then(e=>SWD.Go())
+        .then(e=>delay(50))
+        .then(e=>SWD.Halt())
+        .then(e=>SWD.ReadReg(15)).then(e=>console.log(Hex32(e)))
+        .then(e=>SWD.Go());
+    }
+
+    function delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    async function downloadspibin(bin,downloadinfo) {
+        if(!bin)return;
+        const ADDR_STAS= downloadinfo.symbol.stats.st_value;
+        const ADDR_XOR = downloadinfo.symbol.xorvalue.st_value;
+        const ADDR_SUM = downloadinfo.symbol.sumdata.st_value;
+        const ADDR_ADDR= downloadinfo.symbol.addr.st_value;
+        const ADDR_DATA= downloadinfo.symbol.databuff.st_value;
+
+
+        console.log(`STAS: 0x${Hex32(ADDR_STAS)}`);
+        console.log(`XOR: 0x${Hex32(ADDR_XOR)}`);
+        console.log(`SUM: 0x${Hex32(ADDR_SUM)}`);
+        console.log(`ADDR: 0x${Hex32(ADDR_ADDR)}`);
+        console.log(`DATA: 0x${Hex32(ADDR_DATA)}`);
+
+        await SWD.connect()
+        .then(e=>SWD.connect())
+        .then(e=>SWD.softReset())
+        .then(e=>SWD.WriteReg(15,0x20000000))
+        .then(e=>SWD.ReadReg(15)).then(e=>console.log(Hex32(e)))        
+        .then(e=>SWD.writeMem32(0x20000000,downloadinfo.ROM))
+        .then(e=>SWD.WriteData(0xE000ED08,0x20000000))
+        .then(e=>SWD.ReadReg(15)).then(e=>console.log(Hex32(e)))
+        .then(e=>SWD.Go())
+        .then(e=>SWD.WriteData(ADDR_ADDR,0xffffffff))
+        .then(e=>SWD.WriteData(ADDR_STAS,3))
+        .then(e=>delay(10))
+        .then(e=>SWD.Halt())
+        .then(e=>SWD.ReadReg(15)).then(e=>console.log(Hex32(e)))
+        .then(e=>SWD.Go())
+        
+        for (let i = 0; i < 100; i++) {
+            let sta=await SWD.ReadData(ADDR_STAS);
+            console.log(`i:${i} sta:${sta}`);
+            if(sta&0x80)break;
+            if(i==99)return;
+            await delay(100);
+        }
+        let count=bin.length;
+        let binsize=bin.length;
+        let index=0;
+        let packetsize=0;
+        let first=2;
+        console.log(`count:${count}`);
+        setUploadRate(0);
+        let timer=setInterval(() => {
+            setUploadRate((index+(SWD.transRate*256))/binsize);
+        }, 100);
+        while(count){
+            let chunkSize = count>=256?256:count;
+            let chunk = bin.slice(0, chunkSize);
+            bin = bin.slice(chunkSize);
+            count -= chunkSize;
+            let sum=0;
+            if (chunk.length<256){
+                if(!Array.isArray(chunk)){
+                    let carr=[];
+                    carr.push(...chunk);
+                    chunk=carr;
+                }
+                while(chunk.length < 256)chunk.push(0xFF);
+            }
+            for(let i = 0; i < chunk.length; i++) {
+                sum += chunk[i];
+            }
+            do{
+            console.log(`count:${count} chunk:${chunk.length} index:${index}`);
+            await SWD.writeMem32(ADDR_DATA, chunk)
+            .then(e=>SWD.WriteData(ADDR_SUM,sum))
+            .then(e=>SWD.WriteData(ADDR_ADDR,index))
+            .then(e=>SWD.WriteData(ADDR_STAS,2))
+            for (let i = 0; i < 127; i++) {
+                let sta=await SWD.ReadData(ADDR_STAS);
+                //console.log(`i:${i} sta:${sta}`);
+                if(sta&0x80)break;
+                if(i==127){
+                    clearInterval(timer);
+                    return;
+                }
+            }
+            if(first)first--;
+            }while(first);
+            SWD.transRate=0;
+            index+=chunkSize;
+        }
+        clearInterval(timer);
+        setUploadRate(-1);
+        await SWD.connect()
+        .then(e=>SWD.connect())
+        .then(e=>SWD.softReset())
+        .then(e=>delay(50))
+        .then(e=>SWD.Go())
+        .then(e=>delay(50))
+        .then(e=>SWD.Halt())
+        .then(e=>SWD.ReadReg(15)).then(e=>console.log(Hex32(e)))
+        .then(e=>SWD.Go());
+    }
+
+    async function uploadspibin(addr=0,size,downloadinfo) {
+        //if(!bin)return;
+        const ADDR_STAS= downloadinfo.symbol.stats.st_value;
+        const ADDR_XOR = downloadinfo.symbol.xorvalue.st_value;
+        const ADDR_SUM = downloadinfo.symbol.sumdata.st_value;
+        const ADDR_ADDR= downloadinfo.symbol.addr.st_value;
+        const ADDR_DATA= downloadinfo.symbol.databuff.st_value;
+
+
+        console.log(`STAS: 0x${Hex32(ADDR_STAS)}`);
+        console.log(`XOR: 0x${Hex32(ADDR_XOR)}`);
+        console.log(`SUM: 0x${Hex32(ADDR_SUM)}`);
+        console.log(`ADDR: 0x${Hex32(ADDR_ADDR)}`);
+        console.log(`DATA: 0x${Hex32(ADDR_DATA)}`);
+
+        await SWD.connect()
+        .then(e=>SWD.connect())
+        .then(e=>SWD.softReset())
+        .then(e=>SWD.WriteReg(15,0x20000000))
+        .then(e=>SWD.ReadReg(15)).then(e=>console.log(Hex32(e)))        
+        .then(e=>SWD.writeMem32(0x20000000,downloadinfo.ROM))
+        .then(e=>SWD.WriteData(0xE000ED08,0x20000000))
+        .then(e=>SWD.ReadReg(15)).then(e=>console.log(Hex32(e)))
+        .then(e=>SWD.Go())
+        .then(e=>delay(10))
+        .then(e=>SWD.Halt())
+        .then(e=>SWD.ReadReg(15)).then(e=>console.log(Hex32(e)))
+        .then(e=>SWD.Go())
+        
+        let count=size;
+        let binsize=size;
+        let index=addr;
+        let packetsize=0;
+        console.log(`count:${count}`);
+        setUploadRate(0);
+        let timer=setInterval(() => {
+            setUploadRate((index+(SWD.transRate*256))/binsize);
+        }, 100);
+        let data=[];
+        while(count){
+            let chunkSize = count>=256?256:count;
+            count -= chunkSize;
+            chunkSize=256
+            console.log(`count:${count} chunk:${chunkSize} index:${index}`);
+            await SWD.WriteData(ADDR_ADDR,index)
+            .then(e=>SWD.WriteData(ADDR_STAS,1))
+            for (let i = 0; i < 127; i++) {
+                let sta=await SWD.ReadData(ADDR_STAS);
+                //console.log(`i:${i} sta:${sta}`);
+                if(sta&0x80)break;
+                if(i==127){
+                    clearInterval(timer);
+                    return;
+                }
+            }
+            data.push(... await SWD.readMem32(ADDR_DATA, chunkSize));
+            SWD.transRate=0;
+            index+=chunkSize;
+        }
+        clearInterval(timer);
+        setUploadRate(-1);
+        await SWD.connect()
+        .then(e=>SWD.connect())
+        .then(e=>SWD.softReset())
+        .then(e=>delay(50))
+        .then(e=>SWD.Go())
+        .then(e=>delay(50))
+        .then(e=>SWD.Halt())
+        .then(e=>SWD.ReadReg(15)).then(e=>console.log(Hex32(e)))
+        .then(e=>SWD.Go());
+        return u32t8(data).slice(0,size);
+    }
+
+    async function savespiflash(size,addr=0){
+        download_uint8(await uploadspi(addr,size),'spirom.bin');
+    }
+
+    async function downloadbin_device(bin=null,device=null) {
+        if(!bin)return;
+        if(!device)return;
+        await SWD.connect()
+        .then(e=>SWD.connect())
+        .then(e=>SWD.softReset());
+        let index=0;
+        let count=device.ROM.length;
+        do{
+            let ct=count>=1024?1024:count;
+            let chunk = device.ROM.slice(index, index + ct);
+            await SWD.writeMem32(device.RAM + index, chunk);
+            count-=ct;
+            index+=ct;
+        }while(count);
+        
+        index=0;
+        count=bin.length;
+        console.log(`count:${count}`);
+        let exec=async (func,r0=0,r1=0,r2=0,r3=0,databuff=device.RSB,sp=device.BUFF-4,bkpt=device.BKPT)=>{
+            await SWD.WriteReg(0,r0)
+            .then(e=>SWD.WriteReg(1,r1))
+            .then(e=>SWD.WriteReg(2,r2))
+            .then(e=>SWD.WriteReg(3,r3))
+            .then(e=>SWD.WriteReg(9,databuff))
+            .then(e=>SWD.WriteReg(13,sp))
+            .then(e=>SWD.WriteReg(14,bkpt))
+            .then(e=>SWD.WriteReg(15,func))
+            .then(e=>SWD.WriteReg(16,0x01000000))
+            .then(e=>SWD.Go());
+            for (let i = 0; i < 160; i++)if(await SWD.isHalt())return true;
+            return false;
+        }
+
+        if(!await exec(device.Init))return;
+        if(!await exec(device.EraseChip))return;
+        let pagesize=1024;
+        let binsize=count;
+        while(count){
+            
+            let chunkSize = count>=pagesize?pagesize:count;
+            let chunk = bin.slice(0, chunkSize);
+            bin = bin.slice(chunkSize);
+            count -= chunkSize;
+            console.log(`count:${count} chunk:${chunk.length} index:${index} rate:${index/binsize}`);
+            let wr=await SWD.writeMem32(device.BUFF,chunk)
+            .then(e=>exec(device.ProgramPage,index+device.DevAdr,chunkSize,device.BUFF));
+            if(!wr)return;
+            index+=chunkSize;
+            setUploadRate(index/binsize);
+        }
+        setUploadRate(-1);
+        await SWD.connect()
+        .then(e=>SWD.connect())
+        .then(e=>SWD.softReset())
+        .then(e=>SWD.Go());
+    }
+
+
+    async function syswrite(func,r0=0,r1=0,r2=0,r3=0,databuff=0x20000400,sp=0x200003FC,bkpt=0x20000001){
+        await WriteReg(0,r0)
+        .then(e=>WriteReg(1,r1))
+        .then(e=>WriteReg(2,r2))
+        .then(e=>WriteReg(3,r3))
+        .then(e=>WriteReg(9,databuff))
+        .then(e=>WriteReg(13,sp))
+        .then(e=>WriteReg(14,bkpt))
+        .then(e=>WriteReg(15,func))
+        .then(e=>WriteReg(16,0x01000000));
+    }
+    
+    let syscall=async (func,r0=0,r1=0,r2=0,r3=0,sp=0x200003FC,bkpt=0x20000001)=>{
+        await WriteReg(0,r0)
+        .then(e=>WriteReg(1,r1))
+        .then(e=>WriteReg(2,r2))
+        .then(e=>WriteReg(3,r3))
+        //.then(e=>WriteReg(9,device.RSB))
+        .then(e=>WriteReg(13,sp))
+        .then(e=>WriteReg(14,bkpt))
+        .then(e=>WriteReg(15,func))
+        .then(e=>Go());
+        for (let i = 0; i < 160; i++)if(await isHalt())break;
+    }
+
+    function viewhex(array,hex=true){
+        let str=[];
+        str.push('HEX   |')
+        for (let i = 0; i < 16; i++) {
+            str.push(hex && `${toHex(i&0xff)} ` || `${i.toString().padStart(2, '0')} `);
+        }
+        let newline=true;
+        let lineindex=0;
+        for (let i = 0; i < array.length; i++) {
+            
+            if(i%16==0){
+                newline=true;
+            }
+            if(newline){
+                newline=false;
+                let it=hex && (toHex((i>>>8)&0xff)+toHex(i&0xff)) || (''+i);
+                while(it.length<5)it+=' ';
+                str.push(`\r\n${it} |`);
+            }
+            str.push(`${toHex(array[i]&0xff)} `);
+        }
+        return str.join('');
+    }
+
+
+    async function viewregs(){
+        let str=[];
+        for (let i = 0; i < 17; i++) {
+            let v=await SWD.ReadReg(i);
+            if(i<13){
+                let r=`R`+i;
+                if(i<10)r+=' '
+                str.push(`${r} = 0x${toHex32(v)}\r\n`);
+            }
+            else{
+                switch(i){
+                    case 13:str.push(`SP  = 0x${toHex32(v)}\r\n`);break;
+                    case 14:str.push(`LR  = 0x${toHex32(v)}\r\n`);break;
+                    case 15:str.push(`PC  = 0x${toHex32(v)}\r\n`);break;
+                    case 16:str.push(`xPSR= 0x${toHex32(v)}\r\n`);break;
+                }
+            }
+        }
+        return str.join('');
+    }
+
+    function viewlist32(array){
+        let newline=false;
+        let str=[];
+        for (let i = 0; i < array.length; i++) {
+            if(i!=0&&i%4==0){
+                newline=true;
+            }
+            if(newline){
+                newline=false;
+                str.push(`\r\n`);
+            }
+            str.push(`0x${toHex32(array[i])},`);
+        }
+        return str.join('');
+    }
+
+    async function testswd(){
+        await SWD.connect();
+        const cid=SWD.coreID&0x0fffffff;
+        if(cid!=0x0BC11477)return;
+        console.log(`ID: 0x${Hex32(cid)}`);
+        await SWD.softReset();
+        let startTime = performance.now();
+        console.log(await viewregs());
+        console.log(`${performance.now() - startTime}ms`);
+        
+        let b=[];
+        for (let i = 0; i < 1024; i++)b[i]=i&0xff;
+        startTime = performance.now();
+        await SWD.writeMem32(0x20000000,b);
+        console.log(`${performance.now() - startTime}ms`);
+        startTime = performance.now();
+        const v=await SWD.readMem32(0x20000000,1024);
+        console.log(viewhex(u32t8(v)));
+        console.log(`${performance.now() - startTime}ms`);
+    }
+
+    async function SAVE_ROM(count,addr=0x8000000){
+        let index=0;
+        let vals=new Uint8Array(count);
+        do{
+            let ct=count>=1024?1024:count;
+            let mem=await SWD.readMem32(addr + index,ct).then(e=>u32t8(e));
+            vals.set(mem, index);
+            count-=ct;
+            index+=ct;
+        }while(count);
+        
+        download_uint8(vals,'ROM.bin');
+    }
+
+    var download_device={PY32F002A:downloadbin};
+    var upload_device={};
+    var download_selectDevice=download_device['PY32F002A'];
+    var uploadspi=()=>{};
+    var download_info=null;
+    var download_flm=null;
+</script>
+
+<style>
+    .context-menu {
+        display: none;
+        position: absolute;
+        background-color: white;
+        border: 1px solid #ccc;
+        box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2);
+        z-index: 1000;
+        border-radius: 5px;
+        overflow: hidden;
+        user-select: none;
+    }
+    .context-menu-item {
+        display: flex;
+        padding: 8px 16px;
+        cursor: pointer;
+    }
+    .context-menu-item:hover {
+        background-color: #f0f0f0;
+    }
+</style>
+<script>
+        class ContextMenu {
+        constructor(targetElement, menuItems) {
+            this.targetElement = targetElement;
+            this.menuItems = menuItems;
+            this.menuElement = document.createElement('div');
+            this.menuElement.className = 'context-menu';
+            document.body.appendChild(this.menuElement);
+            this.block=false;
+            this.ondrop=()=>{};
+            this.init();
+        }
+
+        init() {
+            this.targetElement.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                let r=this.targetElement.getBoundingClientRect();
+                this.x=e.clientX-r.left;
+                this.y=e.clientY-r.top;
+                this.show(e.clientX, e.clientY);
+            });
+
+            document.addEventListener('click', () => {
+                if(this.block){
+                    this.block=false;
+                    return;
+                }
+                this.hide();
+            });
+        }
+
+        show(x, y) {
+            this.ondrop();
+            this.menuElement.style.display = 'block';
+            const r=this.menuElement.getBoundingClientRect();
+            const width = window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth;
+            const height = window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight;
+            console.log(r);
+            
+            
+            if((y+r.height)>height)y=height-r.height;
+            this.menuElement.style.left = `${x}px`;
+            this.menuElement.style.top = `${y}px`;
+            this.menuElement.style.maxHeight = '0px';
+            this.menuElement.style.maxWidth = '0px';
+            this.menuElement.style.transition='none';
+            this.menuElement.style.opacity='1%';
+            setTimeout(() => {
+                this.menuElement.style.transition='.3s';
+                this.menuElement.style.maxWidth = `1000px`;
+                this.menuElement.style.maxHeight = `${this.menuElement.children.length*2.22+1}em`;
+                this.menuElement.style.opacity='100%';
+            }, 1);
+            if(this.menuElement.children.length==0){
+                this.menuElement.innerHTML = '';
+                this.menuItems.forEach(item => {
+                    const itemElement = document.createElement('div');
+                    itemElement.className = 'context-menu-item';
+                    if(item.text!=null){
+                        itemElement.innerHTML=`<input onmouseenter='this.focus()' type='input' value='${item.text}' style='width:40px;'><span>${item.label}</span>`;
+                        itemElement.children[1].onclick=(e)=>{this.block=1;item.action(e,itemElement,this)};
+                        itemElement.addEventListener('click', (e)=>{this.block-=1;});
+                    }
+                    else
+                    {
+                        itemElement.textContent = item.label;
+                        itemElement.addEventListener('click', (e)=>{item.action(e,itemElement,this)});
+                    }
+                    this.menuElement.appendChild(itemElement);
+                });
+            }
+            
+            for (let i = 0; i < this.menuItems.length; i++) {
+                if(this.menuItems[i].text!=null){
+                    this.menuElement.children[i].children[1].innerText=this.menuItems[i].label;
+                    this.menuElement.children[i].children[0].value=this.menuItems[i].text;
+                }
+                else
+                {
+                    this.menuElement.children[i].textContent = this.menuItems[i].label;
+                }
+            }
+            
+        }
+
+        hide() {
+            this.menuElement.style.display = 'none';
+        }
+    }
+
+</script>
+
+<script>
+    // 扭矩位置模式:2, 位置模式:0 //key:value,key:value
+    // range [50,0,100] //[set,min,max]
+/**
+ * 数据绑定类，用于实现DOM元素与数据模型的双向绑定
+ */
+ class Databind {
+    /**
+     * 构造函数，初始化数据绑定实例
+     */
+    constructor() {
+        /**
+         * @type {Object} 存储数据值的映射表
+         */
+        this.map = {};
+        
+        /**
+         * @type {Object} 存储数据变更回调函数的映射表
+         */
+        this.mapchange = {};
+        
+        /**
+         * @type {Object} 脏数据标记表
+         */
+        this.dirtmap = {};
+        
+        /**
+          * @type {Object} 存储目标元素的映射表
+          */
+        this.targetmap = {};
+        
+        /**
+         * @type {Object} 存储ID更新回调函数的映射表
+         */
+         this.idCallbacks = {};
+
+        /**
+         * @type {number} 用于生成唯一ID的计数器
+         */
+        this.index = 0;
+        
+        /**
+         * @type {boolean} 溢出修复标志，用于处理range类型输入框的边界值问题
+         */
+        this.overflowfix = false;
+        
+
+
+
+
+        let helper = this;
+        
+        /**
+         * 链接DOM元素，根据元素类型设置相应的数据绑定逻辑
+         * @param {HTMLElement} e - 要绑定的DOM元素
+         * @returns {Function} 返回更新元素值的函数
+         */
+        this.linkdiv = (e) => {
+            let actions = [];
+            const eventListeners = []; // 存储事件监听器以便清理
+            
+            // 根据元素类型和属性设置不同的绑定逻辑
+            switch (e.tagName.toLowerCase()) {
+                case 'input':
+                    switch (e.type) {
+                        case 'text':
+                            // 文本输入框处理逻辑
+                            actions.push((v) => {
+                                e.value = v;
+                            });
+                            const textInputHandler = (ev) => { helper[ev.target.id] = ev.target.value | 0; };
+                            e.addEventListener('input', textInputHandler);
+                            eventListeners.push({ type: 'input', handler: textInputHandler });
+                            break;
+                        case 'range':
+                            // 范围滑块处理逻辑
+                            actions.push((v) => {
+                                if (v > e.max) {
+                                    e.value = e.max;
+                                    if (this.overflowfix)
+                                        setTimeout(() => {
+                                            e.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+                                        }, 0);
+                                } else if (v < e.min) {
+                                    e.value = e.min;
+                                    if (this.overflowfix)
+                                        setTimeout(() => {
+                                            e.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+                                        }, 0);
+                                } else {
+                                    e.value = v;
+                                }
+                            });
+                            const rangeInputHandler = (ev) => { helper[ev.target.id] = ev.target.value | 0; };
+                            e.addEventListener('input', rangeInputHandler);
+                            eventListeners.push({ type: 'input', handler: rangeInputHandler });
+                            break;
+                        case 'number':
+                            // 数字输入框处理逻辑
+                            actions.push((v) => {
+                                e.value = v;
+                            });
+                            const numberInputHandler = (ev) => { ev.target.value = helper[ev.target.id] = ev.target.value | 0; };
+                            e.addEventListener('input', numberInputHandler);
+                            eventListeners.push({ type: 'input', handler: numberInputHandler });
+                            break;
+                        case 'checkbox':
+                            // 复选框处理逻辑
+                            actions.push((v) => {
+                                e.checked = v != 0;
+                            });
+                            const checkboxHandler = (ev) => { helper[ev.target.id] = ev.target.checked | 0; };
+                            e.addEventListener('input', checkboxHandler);
+                            eventListeners.push({ type: 'input', handler: checkboxHandler });
+                            break;
+                    }
+                    break;
+                case 'select':
+                    // 下拉选择框处理逻辑
+                    if (e.hasAttribute('kvt')) e.kvt = eval(e.getAttribute('kvt'));
+                    actions.push((v) => {
+                        if (e.kvt != null)
+                            e.selectedIndex = Object.values(e.kvt).indexOf(v);
+                        else
+                            e.selectedIndex = v;
+                    });
+                    const selectHandler = (ev) => {
+                        if (ev.target.kvt != null)
+                            helper[ev.target.id] = Object.values(ev.target.kvt)[ev.target.selectedIndex];
+                        else
+                            helper[ev.target.id] = ev.selectedIndex;
+                    };
+                    e.addEventListener('input', selectHandler);
+                    eventListeners.push({ type: 'input', handler: selectHandler });
+                    break;
+                case 'span':
+                    // span元素处理逻辑
+                    actions.push((v) => {
+                        if (e.hasAttribute('format'))
+                            e.innerText = e.getAttribute('format').replace('{}', '' + v);
+                        else
+                            e.innerText = '' + v;
+                    });
+                    break;
+                case 'textarea':
+                    // 文本域处理逻辑
+                    actions.push((v) => {
+                        e.value = v;
+                    });
+                    const textareaHandler = (ev) => { ev.target.value = helper[ev.target.id] = ev.target.value; };
+                    e.addEventListener('input', textareaHandler);
+                    eventListeners.push({ type: 'input', handler: textareaHandler });
+                    break;
+                default:
+                    // 默认处理逻辑（适用于有value属性的元素）
+                    if (e.value != null) {
+                        actions.push((v) => {
+                            e.value = v;
+                        });
+                        const defaultHandler = (ev) => { ev.target.value = helper[ev.target.id] = ev.target.value; };
+                        e.addEventListener('input', defaultHandler);
+                        eventListeners.push({ type: 'input', handler: defaultHandler });
+                    }
+                    break;
+            }
+            
+            // 在元素上存储清理函数
+            e._databindCleanup = () => {
+                eventListeners.forEach(({ type, handler }) => {
+                    e.removeEventListener(type, handler);
+                });
+                delete e._databindCleanup;
+                delete e.tid;
+            };
+            
+            return actions[0];
+        }
+
+        this.TimerTick=true;
+        this.Timer=setInterval(()=>{
+            this.TimerTick=true;
+            for (const [id,v] of Object.entries(this.dirtmap)) {
+                this.TimerTick=false;
+                this.setValue(id,v);
+                // 触发ID更新回调
+                if (this.idCallbacks[id])this.idCallbacks[id].forEach(callback => callback(v));
+            }
+            if(!this.TimerTick)this.dirtmap={};
+        },100);
+    }
+
+     /**
+     * 添加ID值更新回调函数
+     * @param {string} id - 要监听的ID
+     * @param {Function} callback - 回调函数，当ID值更新时调用
+     * @returns {Function} 返回取消回调的函数
+     */
+     onIdUpdate(id, callback) {
+        if (!this.idCallbacks[id]) {
+            this.idCallbacks[id] = [];
+        }
+        
+        this.idCallbacks[id].push(callback);
+        
+        // 返回取消该回调的函数
+        return () => this.offIdUpdate(id, callback);
+    }
+
+    /**
+     * 移除ID值更新回调函数
+     * @param {string} id - 要移除回调的ID
+     * @param {Function} [callback] - 要移除的特定回调函数，如果不传则移除该ID的所有回调
+     */
+    offIdUpdate(id, callback) {
+        if (!this.idCallbacks[id]) return;
+        
+        if (callback) {
+            this.idCallbacks[id] = this.idCallbacks[id].filter(cb => cb !== callback);
+        } else {
+            // 如果没有指定回调函数，则移除该ID的所有回调
+            delete this.idCallbacks[id];
+        }
+    }
+
+    setValue(id,value){
+        //this.dirtmap[id] = true;
+        this.map[id] = value;
+        this.mapchange[id].forEach(e => e(value));
+    }
+        
+    /**
+     * 绑定DOM元素到数据模型
+     * @param {string} id - 数据属性名
+     * @param {HTMLElement} div - 要绑定的DOM元素
+     * @param {*} [value=0] - 初始值
+     */
+    bind(id, div, value = 0) {
+        // 如果元素已有绑定，先解绑
+        if (div.tid != null) {
+            this.unbind(div);
+        }
+
+        // 如果属性不存在，初始化属性
+        if (this.map[id] == null) {
+            this.map[id] = value;
+            this.mapchange[id] = [];
+            Object.defineProperty(this, id, {
+                get: () => this.map[id],
+                set: function(v) {
+                    if(this.TimerTick){
+                        this.TimerTick=false;
+                        this.setValue(id,v);
+                        // 触发ID更新回调
+                        if (this.idCallbacks[id]) {
+                            this.idCallbacks[id].forEach(callback => callback(v));
+                        }
+                    }
+                    else{
+                        this.dirtmap[id] = v;
+                    }
+                }
+            });
+        }
+
+        // 设置元素绑定信息
+        div.tid = this.index++;
+        const e = { id: id, action: this.linkdiv(div) };
+        this.targetmap[div.tid] = e;
+        this.mapchange[id].push(e.action);
+        div.id = id;
+    }
+
+    /**
+     * 解绑DOM元素
+     * @param {HTMLElement} div - 要解绑的DOM元素
+     * @returns {boolean} 返回是否成功解绑
+     */
+    unbind(div) {
+        const tid = div.tid;
+        if (tid === undefined || !this.targetmap[tid]) return false;
+        
+        // 从映射表中移除绑定信息
+        const e = this.targetmap[tid];
+        this.mapchange[e.id] = this.mapchange[e.id].filter(i => (i != e.action));
+        delete this.targetmap[tid];
+        
+        // 清理事件监听器
+        if (div._databindCleanup) {
+            div._databindCleanup();
+        }
+        
+        return true;
+    }
+
+    /**
+     * 完全移除控件并清理绑定
+     * @param {HTMLElement} div - 要移除的DOM元素
+     */
+    removeControl(div) {
+        this.unbind(div);
+        if (div.parentNode) {
+            div.parentNode.removeChild(div);
+        }
+    }
+}
+</script>
+
+<script>
+    var DragDiv=(function(){
+    var instance;
+    var DragList;
+    var MaxRect;
+
+    function init() {
+        console.log("这段代码只会运行一次");
+        DragList=[];
+        MaxRect=null;
+        DragStep=null;
+        let style = document.createElement('style');
+        style.type = 'text/css';
+        style.appendChild(document.createTextNode(`
+    .rs-ct{
+        --sc:1.0;
+        box-shadow: 2px 2px 3px black;
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        
+        border-radius: 5px;
+        overflow: hidden;
+        background-color: transparent;
+        border: 2px solid black;
+        transform-origin: center center; /* 设置缩放的基点为中心 */
+        transition: transform 0.3s; /* 添加缩放动画 */
+        font-weight: bold;
+        transform: scale(var(--sc));
+        z-index: 999;
+    }
+
+    .rs-ct.scal{
+        transform: scale(calc(var(--sc) + 0.05));
+        box-shadow: 2px 2px 15px black;
+    }
+    .rs-ct.drag{
+        border: 2px dashed #000;
+    }
+    .rs-rb{
+        position: absolute;
+        bottom: -7px;
+        right: -7px;
+        width: 20px;
+        height: 20px; 
+        cursor:nwse-resize;
+        touch-action: none;
+    }
+    .rs-del{
+        position: absolute;
+        top: 5px;
+        right: 8px;
+        width: 12px;
+        height: 12px; 
+        background-color: red;
+        border-radius: 50%;
+    }
+    .rs-mv{
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        height: 25px;
+        background-color: rgb(180, 180, 180);
+        user-select: none;
+        touch-action: none;
+    }
+    .rs-mv::after{
+        content: var(--sn);
+    }
+    .rs-c{
+        position: absolute;
+        width: 100%;
+        height: calc(100% - 25px);
+        
+    }
+    .selecttag{
+        position: absolute;
+        left: 10px;
+        top: 10px;
+        width: 50px;
+        height: 50px;
+        background-color: rgb(9, 177, 255);
+        border: 1px solid #000;
+        opacity: 0.3;
+        display: none;
+        touch-action: none;
+        z-index: 999;
+    }
+    `));
+        document.head.appendChild(style);
+        return {
+            create: function(div,name='卡片',w=200,h=200,remove=false,resize=false,dragfull=false) {
+                let val=document.createElement("div");
+                val.className="rs-ct";
+                const { left, top, width, height } = div.getBoundingClientRect();
+                val.style.left=((width-w)/2)+'px';
+                val.style.top=((height-h)/2)+'px';
+                val.style.width=w+'px';
+                val.style.height=h+'px';
+                //val.style.contain=name;
+                val.innerHTML=`
+                <div class="rs-mv"></div>
+                <div class="rs-c"></div>
+                ${resize?'<div class="rs-rb"></div>':""}
+                ${remove?'<div class="rs-del"></div>':""}`;
+                let item=val;
+                let dragitem=val.children[0];
+                val.titlediv=dragitem;
+                let dragrs=resize?val.children[2]:null;
+                let removebt=remove?(resize?val.children[3]:val.children[2]):null;
+                val.stepmove=8;
+                if(removebt){
+                    removebt.onclick=(e)=>{
+                        //calls(closecalls,e.target.parentNode);
+                        val.ondivclose(e);
+                        e.target.parentNode.remove();
+                    };
+                }
+                dragitem.style.setProperty('--sn', `"${name}"`);
+                //val.onresize=()=>{};
+                val.ondivresize=()=>{};
+                val.ondivclose=()=>{};
+                val.onstartdrag=()=>{};
+                val.onmovedrag=()=>{};
+                val.onenddrag=()=>{};
+
+                if(MaxRect==null){
+                    const r=div.getBoundingClientRect();
+                    MaxRect=[r.left,r.top,r.left+r.width,r.top+r.height]
+                    console.log(MaxRect);
+                }
+
+                let userdown=e=>{
+                //dragitem.onpointerdown=e=>{//只能拖动标题
+                //val.onpointerdown=e=>{//能拖动全局
+                    
+                    //val.classList.toggle('scal');
+                    const r=div.getBoundingClientRect();
+                    MaxRect=[r.left,r.top,r.left+r.width,r.top+r.height];
+                    let tag=item;
+                    
+                    const {left,top,width,height}=tag.getBoundingClientRect();
+                    //console.log(tag)
+                    //console.log(e)
+                    
+                    if(DragList.indexOf(item)==-1)
+                    {   
+                        DragList.length=0;
+                        DragList.push(item);
+                    }
+                    DragList.forEach(xc => {
+                        xc.onstartdrag(xc,e);
+                        const rx=xc.getBoundingClientRect();
+                        xc._offx=xc.offsetLeft-rx.left;
+                        xc._offy=xc.offsetTop-rx.top;
+                        xc._left=rx.left-e.pageX;
+                        xc._top=rx.top-e.pageY;
+                        xc._width=rx.width;
+                        xc._height=rx.height;
+                    });
+                    //console.log(`x:${tag._left} y:${tag._top}`)
+                    document.onpointermove=m=>{
+                        //dragmove(m.pageX,m.pageY)
+                        
+                        let sx=m.pageX;
+                        let sy=m.pageY;
+                        //console.log(`x:${sx} y:${sy}`);
+                        DragList.forEach(x => {
+                            if(x._top!=null){
+                                let lx=sx+x._left+x._offx+MaxRect[0];
+                                let ly=sy+x._top+x._offy+MaxRect[1];
+                                if(lx<MaxRect[0])
+                                    lx=MaxRect[0];
+                                if(ly<MaxRect[1])
+                                    ly=MaxRect[1];
+                                if(lx+x._width>MaxRect[2])
+                                    lx=MaxRect[2]-x._width;
+                                if(ly+x._height>MaxRect[3])
+                                    ly=MaxRect[3]-x._height;
+                                if(lx<MaxRect[0])
+                                    lx=MaxRect[0];
+                                if(ly<MaxRect[1])
+                                    ly=MaxRect[1];
+                                if(DragStep){
+                                    lx=(((lx+DragStep/2)/DragStep)|0)*DragStep;
+                                    ly=(((ly+DragStep/2)/DragStep)|0)*DragStep;
+                                }
+                                
+                                x.style.left=`${x.left=(lx-MaxRect[0])}px`;
+                                x.style.top=`${x.top=(ly-MaxRect[1])}px`;
+                                x.onmovedrag(x,m);
+                            }
+                        });
+                    }
+                    document.onpointerup=m=>{
+                        DragList.forEach(x=>{val.onenddrag(x,m);})
+                        document.onpointermove=()=>{}
+                        document.onpointerup=()=>{}
+                    }
+                };
+                
+                val.onpointerdown=(e)=>{
+                    let mdiv=val;
+                    if(mdiv._topmost){
+                        if(mdiv.parentNode.lastChild!=mdiv)
+                           mdiv.parentNode.appendChild(mdiv);
+                    }
+                    if(dragfull){
+                        if(dragrs){
+                            let r=dragrs.getBoundingClientRect();;
+                            let x=e.pageX;
+                            let y=e.pageY;
+                            if (x >= r.left && x <= r.left + r.width && y >= r.top && y <= r.top + r.height)return;
+                        }
+                        userdown(e);
+                    }
+                };
+                dragitem.onpointerdown=(e)=>{if(!dragfull)userdown(e)};
+
+                if(dragrs){
+                let type=15;
+                dragrs.onpointerdown=e=>{
+                    const r1=item.getBoundingClientRect();
+                    const r2=item;
+                    const r3=div.getBoundingClientRect();
+                    //console.log(r1)
+                    //console.log(r2)
+                    let x=e.pageX-r3.left-(type&1?r1.width:-r1.width)-(type&1?(e.pageX-r1.width-r1.left):(e.pageX-r1.left));
+                    let y=e.pageY-r3.top-(type&2?r1.height:-r1.height)-(type&2?(e.pageY-r1.height-r1.top):(e.pageY-r1.top));
+                    
+                    let sw=(type&1?r1.width:-r1.width);
+                    let sh=(type&2?r1.height:-r1.height);
+                    let bx=e.pageX;
+                    let by=e.pageY;
+
+                    let bw=parseInt(window.getComputedStyle(item).borderTopWidth);
+
+                    //console.log(`[${e.pageX-r1.left},${e.pageY-r1.top}},${e.pageX},${e.pageY}]x:${x} y:${y} w:${sw} h:${sh} t:${type}`);
+                    document.onpointermove=m=>{
+                        let w=m.pageX-bx;
+                        let h=m.pageY-by;
+                        let r={w:w,h:h};
+                        if(type&0x04){
+                            if(w+sw<0){
+                                //x=x+w+sw;
+                                //w=-w-sw-2;
+                                r2.style.left=`${x+w+sw}px`;
+                                r2.style.width=`${-w-sw-2}px`;
+                                r.w=-w-sw;
+                                //console.log(`{X:${x+w+sw} W:${-w-sw-2}}`);
+                            }
+                            else{
+                                if(x+w+sw<MaxRect[2]){
+                                    r2.style.left=`${x}px`;
+                                    r.w=w+sw-bw*2;
+                                    if(DragStep)r.w=(((r.w+DragStep/2)/DragStep)|0)*DragStep;
+                                    
+                                    r2.style.width=`${r.w}px`;
+                                }
+                                //console.log(`2:${m.pageX+lx}|${x}`)
+                            }
+                        }
+                        if(type&0x08){
+                            if(h+sh<0){
+                                r2.style.top=`${y+h+sh}px`;
+                                r2.style.height=`${-h-sh-2}px`;
+                                console.log(3)
+                                r.h=-h-sh;
+                            }
+                            else{
+                                if(y+h+sh<MaxRect[3]){
+                                    if(y<0)y=0;
+                                    r2.style.top=`${y}px`;
+                                    r.h=h+sh-bw*2;
+                                    if(DragStep)r.h=(((r.h+DragStep/2)/DragStep)|0)*DragStep;
+                                    
+                                    r2.style.height=`${r.h}px`;
+                                    resize=true;
+                                }
+                                //console.log(`4:${m.pageY+ly}|${y}`)
+                            }
+                        }
+                        if(r.w>0&&r.h>0)val.ondivresize(r);
+                        //    val.onresize(r);
+                    }
+                    document.onpointerup=m=>{
+                        document.onpointermove=()=>{}
+                        document.onpointerup=()=>{}
+                    }
+                };
+                }
+                val._topmost=true;
+                val.panel=val.children[1];
+                val.panel.titlediv=val.titlediv;
+                val.titlediv.panel=val.panel;
+                val.center=(x,y)=>{
+                    let r=val.getBoundingClientRect();
+                    let ct={x:r.width/2+r.left,y:r.top+r.height/2};
+                    if(x)val.style.left=`${x+r.width/2}px`;
+                    if(y)val.style.top=`${y+r.height/2}px`;
+                    return ct;
+                }
+                val.show=(sty)=>{
+                    if(sty)val.style.cssText=sty;
+                    val.style.display='block';
+                }
+                val.hide=()=>{
+                    val.style.display='none';
+                    return val.style.cssText;
+                }
+                val.close=()=>{
+                    if(val.removebt)
+                        val.removebt.click();
+                    else{
+                        val.ondivclose();
+                        val.remove();
+                    }
+                }
+                val.isRect=(srcdiv)=>{
+                    const rect1=srcdiv.getBoundingClientRect();
+                    const rect2=val.getBoundingClientRect();
+                    const maxX = Math.max(rect1.left + rect1.width, rect2.left + rect2.width);
+                    const maxY = Math.max(rect1.top + rect1.height, rect2.top + rect2.height);
+                    const minX = Math.min(rect1.left, rect2.left);
+                    const minY = Math.min(rect1.top, rect2.top);
+                    if (maxX - minX <= rect1.width + rect2.width && maxY - minY <= rect1.height + rect2.height) {
+                        return true;
+                    } else {
+                        return false;
+                    }
+                }
+                val.isRectPoint=(x,y)=>{
+                    const r=val.getBoundingClientRect();
+                    if (x>=r.left&&x<=r.left+r.width&&y>=r.top&&y<=r.top+r.height) {
+                        return true;
+                    } else {
+                        return false;
+                    }
+                }
+                val.addselect=(div)=>{
+                    DragList.push(div);
+                };
+                val.clearselect=()=>{
+                    DragList=[];
+                };
+                Object.defineProperty(val, 'TopMost', {
+                    get: function() { 
+                     return val._topmost; },
+                    set: function(value) { 
+                        val._topmost=value;
+                        if(value){
+                            let mdiv=val;
+                            if(mdiv.parentNode.lastChild!=mdiv)
+                                mdiv.parentNode.appendChild(mdiv);
+                        }
+                    }
+                });
+                div.appendChild(val);
+                return val;
+            },
+            MultiSelect:function(item){
+                let val=document.createElement("div");
+                val.classList.add('selecttag');
+                
+                val.enable=true;
+                item.onpointerdown=e=>{
+                    if(e.button!=0)return;
+                    if(!val.enable)return;
+                    item.appendChild(val);
+                    const r1=item.getBoundingClientRect();
+                    const r2=val;
+                    let mdiv=val;
+                    if(mdiv.parentNode.lastChild!=mdiv)
+                        mdiv.parentNode.appendChild(mdiv);
+                    DragList.length=0;
+                    let x=e.pageX-r1.left;
+                    let y=e.pageY-r1.top;
+                    r2.style.left=`${x}px`;
+                    r2.style.top=`${y}px`;
+                    r2.style.width=`0px`;
+                    r2.style.height=`0px`;
+                    r2.style.display=`block`;
+                    document.onpointermove=m=>{
+                        let w=m.pageX-r1.left-x;
+                        let h=m.pageY-r1.top-y;
+                        if(w<0){
+                            r2.style.left=`${x+w}px`;
+                            r2.style.width=`${-w}px`;
+                        }
+                        else{
+                            r2.style.left=`${x}px`;
+                            r2.style.width=`${w}px`;
+                        }
+                        if(h<0){
+                            r2.style.top=`${y+h}px`;
+                            r2.style.height=`${-h}px`;
+                        }
+                        else{
+                            r2.style.top=`${y}px`;
+                            r2.style.height=`${h}px`;
+                        }
+                    }
+                    document.onpointerup=m=>{
+                        document.onpointermove=()=>{}
+                        document.onpointerup=()=>{}
+                        
+                        //const rs=r2.getBoundingClientRect();
+                        DragList.length=0;
+                        Array.from(item.parentNode.children).forEach(t=>{
+                            if(t.isRect&&t.isRect(r2)){
+                                if(t.laststyle==null){
+                                    t.laststyle=t.style.border;
+                                }
+                                t.style.border="2px solid aqua";
+                                DragList.push(t)
+                            }
+                            else
+                                t.style.border=t.laststyle;
+                            //console.log(t);
+                        });
+                        r2.style.display=`none`;
+                        val.remove();
+                    }
+                }
+                item.ondragenter=e=>{
+                    e.preventDefault()
+                }
+                item.ondragover=e=>{
+                    e.preventDefault()
+                }
+                return val;
+            },
+            Step:function(x){
+                DragStep=x;
+            },
+            Selects:(sel)=>{
+                if(sel==null)return DragList;
+                DragList.forEach(t=>(t.laststyle && (t.style.border=t.laststyle)));
+                DragList=sel;
+                DragList.forEach(t=>{
+                    if(t.laststyle==null)t.laststyle=t.style.border;
+                    t.style.border="2px solid aqua";
+                });
+            },
+        };
+    }
+    
+    return {
+        getInstance: function() {
+            if (!instance) {
+                instance = init();
+            }
+            return instance;
+        }
+    };
+})().getInstance();
+
+</script>
+
+<script>
+    class Chart{
+        constructor(canvas,adv=0xff){
+            this.canvas=canvas;
+            this.ctx=canvas.getContext('2d');
+            this.tempCanvas = document.createElement('canvas');
+            this.tempCtx = this.tempCanvas.getContext('2d');
+            this.wavedata=[];
+            this.wave=[];
+            this.subwavedata=[];
+            this.maxCache=10000;
+            this.width = this.tempCanvas.width = canvas.width;
+            this.height = this.tempCanvas.height = canvas.height;
+            
+            this.colorlist=['#00f','#f00','#ff0','#0ff','#0f0','#f0f','#000'];
+            this.waveName=[];
+            
+            this.AdvType={ToolTip:1,Drag:2,TopRange:4};
+            this.EnableToolTip=adv&this.AdvType.ToolTip;
+            this.EnableTopRange=adv&this.AdvType.TopRange;
+            this.CheckDragRate=(x,y)=>{
+                if(!this.EnableTopRange)return false;
+                const hw=this.width/2;
+                if(x>hw-25&&x<hw+25&&y<20){
+                    return true;
+                }
+                return false;
+            }
+            
+            this.isDragging = false; // 拖动状态
+            this.isDragRate = false;
+            this.dragStartX = 0; // 拖动起始X坐标
+            this.drawStartXOffset=0;
+            this.dragStartY = 0; // 拖动起始Y坐标
+
+            this.pointsize=2;
+            this.maxPoints=1000;
+            this.showPoints=50;
+            this.dataIndex=0;
+            this.dragXBase=0;
+            this.dragXIndex=0;
+            this.pointwidth=this.width/this.showPoints;
+            this.selectpoint=-1;
+            this.hoverindex=-1;
+            this.hoverpos=[0,0];
+            this.font='14px Arial';
+            
+            this.Amplitude={
+                max:1,
+                min:0,
+            };
+            this.Amplitude.max=1;
+            this.Amplitude.min=0;
+            this.AmplitudeOffset = 0; // 幅度偏移
+            this.Amplitudeauto=1;
+            this.AmplitudePadding=0;
+            this.AmplitudeKeepMax=0;
+            this.AmplitudeList=[this.Amplitude];
+            this.pointheight=this.height/(this.Amplitude.max-this.Amplitude.min);
+            this.drawReq=false;
+            this.drawImage();
+
+            if(adv&this.AdvType.Drag){
+            // 为画布添加事件监听器
+            canvas.addEventListener('wheel', (e)=>this.handleZoom(e)); // 添加滚轮事件监听器
+            canvas.addEventListener('mousedown', (e)=>this.handleMouseDown(e)); // 添加鼠标按下事件监听器
+            // 添加鼠标移动事件监听器
+            document.addEventListener('mousemove', (e)=>this.handleMouseMove(e)); 
+            document.addEventListener('mouseup', (e)=>this.handleMouseUp(e)); // 添加鼠标释放事件监听器
+            }
+            this.timer=setInterval(() => {
+                this.drawImage();
+            }, 33);
+            
+        }
+
+        PixelX2Value(x){
+            let pos=((x-this.pointwidth/2)/this.pointwidth+1)|0;
+            if(pos>=this.showPoints)pos=this.showPoints-1;
+            if(pos<0)pos=0;
+            return pos;
+        }
+
+        drawcur(w=true,h=0){
+            let ctx=this.ctx;
+            // 绘制水平轴（时间轴）
+            ctx.beginPath();
+            //ctx.moveTo(0, this.amplitude);
+            //ctx.lineTo(width, this.amplitude);
+            ctx.moveTo(0, 0);
+            ctx.lineTo(0, this.height);
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.font='12px Arial';
+            // 绘制幅度刻度
+            const amplitudeRange = this.Amplitude.max -this.Amplitude.min;
+            const amplitudeSteps = 5;
+            const amplitudeStepHeight = this.height / amplitudeSteps;
+            const amppos=this.AmplitudeOffset<0?-((-this.AmplitudeOffset/amplitudeStepHeight)|0):((this.AmplitudeOffset/amplitudeStepHeight)|0);
+            const ampoffsetpos=this.AmplitudeOffset%amplitudeStepHeight;
+            for (let i = 0; i < amplitudeSteps+1; i++) {
+                ctx.beginPath();
+                const text=`${(amplitudeRange/amplitudeSteps*(amplitudeSteps-i+amppos)+this.Amplitude.min).toFixed(0)}`;
+                if(h<0){
+                    ctx.moveTo(this.width, i * amplitudeStepHeight+ampoffsetpos);
+                    ctx.lineTo(this.width-10, i * amplitudeStepHeight+ampoffsetpos);
+                    ctx.strokeText(text, this.width-text.length*9-8, i * amplitudeStepHeight + 5+ampoffsetpos);
+                }
+                else{
+                    ctx.moveTo(0, i * amplitudeStepHeight+ampoffsetpos);
+                    ctx.lineTo(10, i * amplitudeStepHeight+ampoffsetpos);
+                    ctx.strokeText(text, 15, i * amplitudeStepHeight + 5+ampoffsetpos);
+                }
+                ctx.stroke();
+            }
+            
+            if(!w)return;
+            // 绘制时间刻度
+            const timeSteps = 10;
+            const timeStepWidth = this.width / timeSteps;
+            for (let i = 1; i < timeSteps; i++) {
+                ctx.beginPath();
+                ctx.moveTo(i * timeStepWidth, this.height);
+                ctx.lineTo(i * timeStepWidth, this.height - 10);
+                const text=`${(i * this.showPoints/(timeSteps)+this.dataIndex)|0}`;
+                ctx.strokeText(text, i * timeStepWidth - text.length*3.5, this.height - 15);
+                ctx.stroke();
+            }
+        }
+
+        drawwave(wave=null,color='#00f'){
+            wave=wave?wave:this.wave;
+            let ctx=this.ctx;
+            // 如果没有波形数据，直接返回
+            if (wave.length === 0) {
+                return;
+            }
+
+            // 压缩波形数据以确保最大显示点数
+            let compressedWave = wave;
+            
+
+            // 计算波形数据的最大值和最小值
+            if(this.Amplitudeauto){
+                let padding=this.AmplitudePadding;
+                if(padding<1&&padding>0){
+                    const maxa = Math.max(...compressedWave);
+                    const mina = Math.min(...compressedWave);
+                    const rt=maxa-mina;
+                    if(this.AmplitudeKeepMax){
+                        if(this.Amplitude.max<maxa)
+                            this.Amplitude.max=maxa+padding*rt;
+                        if(this.Amplitude.min>mina)
+                            this.Amplitude.min=mina-padding*rt;
+                    }
+                    else{
+                        this.Amplitude.max=maxa;
+                        this.Amplitude.min=mina;
+                        this.Amplitude.max+=padding*rt;
+                        this.Amplitude.min-=padding*rt;
+                    }
+                }
+                else{
+                    this.Amplitude.max = Math.max(...compressedWave)+this.AmplitudePadding;
+                    this.Amplitude.min = Math.min(...compressedWave)-this.AmplitudePadding;
+                }
+                this.pointheight=this.height/(this.Amplitude.max-this.Amplitude.min);
+            }
+            const amplitudeRange = this.Amplitude.max -this.Amplitude.min;
+            // 计算中心幅度和缩放因子
+            const amplitude = this.height + this.AmplitudeOffset;
+            const scale = amplitudeRange > 0 ? (this.height) / amplitudeRange : 1;
+
+            // 开始绘制波形路径
+            ctx.beginPath();
+            ctx.moveTo(0, amplitude - (compressedWave[0] - this.Amplitude.min) * scale);
+
+            let points=[];
+            // 循环遍历每个像素点来绘制波形
+            let max=this.showPoints>this.maxPoints && this.maxPoints || this.showPoints;
+            if(this.showPoints>this.maxPoints){
+                let maxp=this.maxPoints;
+                if(this.wavedata.length<this.showPoints){
+                    maxp=this.wavedata.length/this.showPoints*max;
+                }
+                if (wave.length > maxp) {
+                    const step = wave.length / maxp;
+                    compressedWave = Array.from({ length: maxp }, (_, i) => {
+                        const start = Math.floor(i * step);
+                        const end = Math.ceil((i + 1) * step);
+                        const segment = wave.slice(start, end);
+                        return segment.reduce((sum, val) => sum + val, 0) / segment.length;
+                    });
+                }
+            }
+            for (let i = 0; i < max; i++) {
+                if(compressedWave.length<=i)break;
+                const x = Math.floor((i / max) * this.width);
+                const y = amplitude - (compressedWave[i] - this.Amplitude.min) * scale;
+                ctx.lineTo(x, y);
+                points.push([x,y]);
+            }
+            // 设置线条样式并绘制波形
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            let ps=this.pointsize;
+            if(ps){
+                ctx.fillStyle = '#000';
+                for (let i = 0; i < points.length; i++) {
+                    const e=points[i];
+                    ctx.beginPath();
+                    ctx.arc(e[0], e[1], ps, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.closePath();
+                }
+                ctx.stroke();
+            }
+
+            return points;
+        }
+        drawindex(points){
+            if(this.hoverindex<0)return;
+            if(this.hoverindex>=this.wave.length)return;
+            if(points.length<=this.hoverindex)return;
+            let ctx=this.ctx;
+            const x=points[this.hoverindex][0];
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, this.height);
+            ctx.strokeStyle = '#3333337f';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            const e=points[this.hoverindex];
+            ctx.fillStyle = '#000';
+            ctx.beginPath();
+            ctx.arc(e[0], e[1], 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.closePath();
+            ctx.stroke();
+            
+
+            let lx = this.hoverpos[0]+20;
+            let ly = this.hoverpos[1];
+            lx+=(lx>this.width-130?-130:0);
+            ly+=(ly>this.height-65?-60:0);
+            ctx.fillStyle = '#eeec';
+            ctx.fillRect(lx, ly, 100, 60);
+            ctx.fillStyle = '#000c';
+            ctx.strokeStyle = '#000c';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(lx, ly, 100, 60);
+            ctx.font = this.font;
+            ctx.strokeText(`索引:${(this.hoverindex+this.dataIndex)}`, lx+3, ly+15);
+            ctx.strokeText(`值:${(this.wave[this.hoverindex]).toFixed(2)}`, lx+3, ly+30);
+            for (let i = 0; i < this.subwavedata.length; i++) {
+                ctx.strokeText(`值${i+2}:${(this.subwavedata[i][this.dataIndex+this.hoverindex]).toFixed(2)}`, lx+3, ly+45+i*15);
+            }
+            ctx.fill();
+        }
+        
+
+        drawratemove(){
+            let ctx=this.ctx;
+            let lx=this.width/2-25;
+            let ly=2;
+            ctx.fillStyle = '#eeec';
+            ctx.fillRect(lx, ly, 51, 20);
+            ctx.lineWidth = 1;
+
+            ctx.strokeStyle = '#000';
+            ctx.strokeRect(lx, ly, 51, 20);
+            ctx.strokeRect(lx+3, ly+12, 45, 4);
+
+            let poff=45*(this.dataIndex+this.showPoints/2)/this.wavedata.length;
+            let plen=45*this.showPoints/this.wavedata.length;
+            let dx=poff-plen/2;
+            if((dx+plen)>46)dx-=(dx+plen)-46;
+            if(dx<0)dx=0;
+            if(plen>=45)plen=45;
+            plen=plen>0?plen:1;
+
+            ctx.beginPath();
+            ctx.moveTo(lx+dx+plen/2+3, ly+11); // Top vertex
+            ctx.lineTo(lx+dx+plen/2+7, ly+11-6); // Bottom left vertex
+            ctx.lineTo(lx+dx+plen/2-1, ly+11-6); // Bottom right vertex
+            ctx.closePath();
+            ctx.fillStyle = '#000';
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.strokeStyle = '#f00';
+            ctx.strokeRect(lx+dx+3, ly+12, plen, 4);
+        }
+
+        drawNames(){
+            if(this.waveName.length==0)return;
+            let ctx=this.ctx;
+            ctx.fillStyle = '#eeec';
+            ctx.fillRect(this.width-105, 15, 65, 5+15*this.waveName.length);
+            ctx.fillStyle = '#000c';
+            ctx.strokeStyle = '#000c';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(this.width-105, 15, 65, 5+15*this.waveName.length);
+            ctx.font = '12px Arial';//this.font;
+            for (let i = 0; i < this.waveName.length; i++) {
+                ctx.fillStyle = ctx.strokeStyle = this.colorlist[i];
+                ctx.strokeText('——', this.width-105+3, 13+15+i*15);
+                ctx.fillStyle = ctx.strokeStyle = '#000';
+                ctx.strokeText(this.waveName[i], this.width-105+3+32, 13+15+i*15);
+            }
+            ctx.fill();
+        }
+
+        drawImage(){
+            if(!this.drawReq)return;
+            this.drawReq=false;
+            // 清除画布
+            this.ctx.clearRect(0, 0, this.width, this.height);
+
+            for (let i = 0; i < this.subwavedata.length; i++) {
+                this.Amplitude=this.AmplitudeList[1+i];
+                this.drawwave(this.subwavedata[i].slice(this.dataIndex,this.dataIndex+this.showPoints),this.colorlist[i+1]);
+                if(i==0)this.drawcur(false,-1);
+            }
+            this.wave=this.wave || this.wavedata.slice(this.dataIndex,this.dataIndex+this.showPoints);
+            this.Amplitude=this.AmplitudeList[0];
+            const points=this.drawwave();
+            if(this.EnableToolTip)
+                this.drawindex(points);
+            this.drawcur();
+            this.drawNames();
+            if(this.EnableTopRange)     
+                this.drawratemove();
+        }
+
+        draw(){
+            this.drawReq=true;
+        }
+
+        
+
+        setName(...name){
+            this.waveName=name;
+        }
+
+        AddPoint(...v){
+            if(this.wavedata.length>=this.maxCache){
+                this.wavedata.shift();
+                this.dataIndex-=1;
+            }
+            this.wavedata.push(v[0]);
+            if(this.wavedata.length>=this.showPoints)
+            {
+                this.dataIndex+=1;
+            }
+            if(this.wavedata.length==this.showPoints){
+                this.dataIndex=0;
+            } 
+            for (let i = 1; i < v.length; i++) {
+                if(this.subwavedata.length<i){
+                    this.subwavedata.push([]);
+                    this.AmplitudeList.push({
+                        max:1,
+                        min:0,
+                    });
+                }
+                if(this.subwavedata[i-1].length>this.maxCache)this.subwavedata[i-1].shift();
+                this.subwavedata[i-1].push(v[i]);
+            }
+            this.wave=null;
+            this.draw()
+        }
+
+        Clear(){
+            this.wavedata.length=0;
+            for (let i = 0; i < this.subwavedata.length; i++) {
+                this.subwavedata[i].length=0;
+            }
+            this.dataIndex=0;
+        }
+
+        handleMouseDown(event) {
+            if(event.button==0){
+                this.drawStartXOffset = event.offsetX;
+                this.dragStartX = event.clientX; // 记录鼠标按下时的X坐标
+                this.dragStartY = event.clientY; // 记录鼠标按下时的Y坐标
+
+                if(this.CheckDragRate(event.offsetX,event.offsetY)){
+                    this.isDragRate=true;
+                    //console.log(`DX:${this.dragStartX}`);
+                    return;
+                }
+                this.dragXBase=this.dataIndex;
+                this.isDragging = true; // 设置拖动状态为true
+                //console.log(`x:${this.dragStartX}`);
+            }
+            if(event.button==1){
+                this.AmplitudeOffset=0;
+                this.Amplitudeauto=true;
+                for (let i = 0; i < this.AmplitudeList.length; i++) {
+                    this.AmplitudeList[i]={max:1,min:0};
+                }
+                this.draw(); // 重新绘制波形
+            }
+        }
+        // 处理鼠标释放事件以结束拖动
+        handleMouseUp() {
+            this.isDragging = false; // 设置拖动状态为false
+            this.isDragRate = false;
+            this.dragXIndex=0;
+            this.draw();
+        }
+
+        handleMouseMove(event) {
+            this.hoverindex=-1;
+            if(this.isDragRate){
+                const dpos=event.clientX-this.dragStartX+this.drawStartXOffset-this.width/2+50/2-2;
+                this.dataIndex=this.wavedata.length/45*dpos-this.showPoints/2;
+                if(this.wavedata.length>=(this.showPoints)){
+                    if((this.dataIndex-1)<0)this.dataIndex+=-(this.dataIndex-1);
+                    if(this.dataIndex+this.showPoints>this.wavedata.length)this.dataIndex=this.wavedata.length-this.showPoints;
+                    if(this.dataIndex<0)this.dataIndex=0;
+                }
+                else{
+                    this.dataIndex=0;
+                }
+                this.dataIndex|=0;
+                this.wave=null;//this.wave=this.wavedata.slice(this.dataIndex,this.dataIndex+this.showPoints);
+                this.draw();
+                //console.log(`dpos:${dpos}`);
+                
+            }
+            else if (this.isDragging) { // 如果处于拖动状态
+                
+                let num=this.PixelX2Value(this.drawStartXOffset)-this.PixelX2Value(event.clientX-this.dragStartX+this.drawStartXOffset);
+                if(this.wavedata.length>=this.showPoints){
+                    const n1=num;
+                    if(this.dragXBase+num-1<0)
+                    {
+                        num+=-(this.dragXBase+num);
+                        //console.log(`n1:${n1} num:${num}`);
+                    }
+                    else if(this.dragXBase+this.showPoints+num-1>=this.wavedata.length)
+                    {
+                        num-=this.dragXBase+this.showPoints+num-1-this.wavedata.length+1;
+                        //console.log(`n2:${n1} num:${num}`);
+                    }
+                    //console.log(`n3:${n1} num:${num}`);
+                    this.dragXIndex=num;
+                    let pos=this.dragXIndex+this.dragXBase;
+                    if((pos+this.showPoints)>this.wavedata.length)pos=this.wavedata.length-this.showPoints;
+                    if(pos<0)pos=0;
+                    this.dataIndex=pos;
+
+                    this.wave=null;//this.wave=this.wavedata.slice(this.dataIndex,this.dataIndex+this.showPoints);
+                }
+
+                const deltaY = event.clientY - this.dragStartY; // 计算Y方向的移动距离
+                this.AmplitudeOffset += deltaY; // 更新幅度偏移
+                this.dragStartY = event.clientY; // 更新当前鼠标Y坐标
+
+                this.draw();
+                //selectpoint=PixelX2Value(event.offsetX)+dragXIndex+dataIndex;
+                //drawWaveform(); // 重新绘制波形
+            }
+            else{
+                this.hoverindex=-1;
+                const r=this.canvas.getBoundingClientRect();
+                const x=(event.clientX-r.left)|0;
+                const y=(event.clientY-r.top)|0;
+                if(x<0||x>this.canvas.width||y<0||y>this.canvas.height)return;
+                this.hoverpos=[x,y];
+                this.hoverindex=this.PixelX2Value(x);
+                this.draw();
+                //console.log(`x:${x} hover:${this.hoverindex}`);
+                
+            }
+        }
+
+        // 处理鼠标滚轮事件以实现缩放功能
+        handleZoom(event) {
+            event.preventDefault(); // 阻止默认行为
+            const delta = Math.sign(event.deltaY); // 获取滚轮方向
+            
+            if(event.offsetX<this.width*0.1){
+                this.Amplitudeauto=false;
+                const size=this.Amplitude.max-this.Amplitude.min;
+                if(size<=400){
+                    this.Amplitude.max+=size*0.15*delta;
+                    this.Amplitude.min-=size*0.15*delta;
+                }
+                else{
+                    this.Amplitude.max+=100*delta;
+                    this.Amplitude.min-=100*delta;
+                }
+            }
+            else{
+                this.hoverindex=-1;
+                const x=this.PixelX2Value(event.offsetX);
+                const xp=(x-.5+1)*100/this.showPoints;
+                const markpos=(this.dataIndex+(xp*this.showPoints/100))|0;
+
+                
+                if(this.showPoints>1000)this.showPoints+=(delta*0.05*this.showPoints)|0;
+                else this.showPoints += delta * 25; // 调整最大显示点数
+                if (this.showPoints < 25) this.showPoints = 25; // 确保最大显示点数不低于100
+                
+
+                if(delta<0)
+                    this.dataIndex=(markpos+(100-xp)*this.showPoints/100+0.5-this.showPoints)|0;
+                else
+                    this.dataIndex=((markpos+(100-xp)*this.showPoints/100-this.showPoints)+1)|0;
+                //console.log(`x:${x} r:${xp} mk:${markpos} index:${this.dataIndex}`);
+                if(this.wavedata.length>=(this.showPoints)){
+                    if((this.dataIndex-1)<0)this.dataIndex+=-(this.dataIndex-1);
+                    if(this.dataIndex+this.showPoints>this.wavedata.length)this.dataIndex=this.wavedata.length-this.showPoints;
+                    if(this.dataIndex<0)this.dataIndex=0;
+                }
+                else{
+                    this.dataIndex=0;
+                }
+                let max=this.showPoints>this.maxPoints && this.maxPoints || this.showPoints;
+                this.pointwidth=this.width/max;
+                this.wave=null;//this.wave=this.wavedata.slice(this.dataIndex,this.dataIndex+this.showPoints);
+            }
+            this.draw(); // 重新绘制波形
+        }
+    }
+</script>
+
+<script>
+        /**
+ * Excel表格组件类
+ * 创建一个类似Excel的交互式表格，支持公式计算、单元格选择、行列调整等功能
+ */
+ class ExcelTable {
+    // 静态标记，确保样式只添加一次
+    static stylesAdded = false;
+
+    /**
+     * 构造函数
+     * @param {string|HTMLElement} container - 容器元素或ID
+     * @param {number} [rows=20] - 初始行数
+     * @param {number} [columns=26] - 初始列数
+     */
+    constructor(container, rows = 20, columns = 26) {
+        // 初始化容器
+        this.container = typeof container === 'string' 
+            ? document.getElementById(container) 
+            : container;
+        
+        // 表格行列配置
+        this.rows = rows;
+        this.columns = columns;
+        
+        // 选择状态相关属性
+        this.isSelecting = false;       // 是否正在选择
+        this.startCell = null;           // 选择起始单元格
+        this.endCell = null;             // 选择结束单元格
+        this.selectCell = null;          // 当前选中单元格
+        this.selectCellKey = null;
+        
+        // 创建选择矩形元素
+        this.selectionRect = document.createElement('div');
+        this.selectionRect.className = 'selection-rect';
+        
+        // 空操作函数
+        this.action_null = () => 0;
+        
+        // 单元格数据缓存和依赖跟踪
+        this.cellData = {}; 
+        this.Data = {map:{}};
+
+        // 配置系统函数
+        this.systemIdentifier = {
+            SUM: (arr)=>{let v=0;arr.forEach(x=>v+=x);return v;},
+            AVG: function(...args) { return args.reduce((a,b) => a+b, 0)/args.length; }
+        };
+        this.actionCall={
+            TIMER:(cell,t)=>this.bindKey(cell,`TIMER${t}`),
+        }
+        
+        // 确保样式只添加一次
+        if (!ExcelTable.stylesAdded) {
+            this.addStyles();
+            ExcelTable.stylesAdded = true;
+        }
+        
+        // 初始化表格
+        this.init();
+        this.container.appendChild(this.selectionRect);
+
+        this.TimerMS=[1,2,3,4,5,6,7,8,9,10];
+        this.TimerDT=[0,0,0,0,0,0,0,0,0,0];
+        setInterval(() => {
+            for (let i = 0; i < this.TimerDT.length; i++) {
+                this.TimerDT[i]--;
+                if(this.TimerDT[i]<=0){
+                    this.TimerDT[i]=this.TimerMS[i];
+                    this.callupdateCell(this.cellData[`TIMER${this.TimerMS[i]}`]);
+                }
+            }
+        }, 100);
+
+        for (let i = 0; i < this.TimerMS.length; i++) {
+            // 初始化单元格数据
+            this.cellData[`TIMER${this.TimerMS[i]}`] = {
+                        value: '',          // 单元格值
+                        formula: '',       // 公式
+                        updateaction: this.action_null, // 更新函数
+                        updatecell: new Set(), // 依赖此单元格的单元格
+                        reqcell: new Set(),    // 此单元格依赖的单元格
+                        input: {value:0},          // 输入框引用
+                        handle:this,
+            };
+        }
+        
+    }
+    bindKey(cell,key){
+        const e=this.cellData[key];
+        cell.reqcell.add(e);
+        e.updatecell.add(cell);
+    }
+    
+    /**
+     * 添加表格样式
+     */
+    addStyles() {
+        const style = document.createElement('style');
+        style.id = 'excel-table-styles';
+        style.textContent = `
+            /* 表格容器样式 */
+            .excel-table-container {
+                display: inline-block;
+                border: 1px solid #ccc;
+                overflow: auto;
+                width: 100%;
+                height: 100%;
+            }
+            
+            /* 表格基础样式 */
+            .excel-table {
+                border-collapse: collapse;
+                table-layout: fixed;
+            }
+            
+            /* 表头和单元格基础样式 */
+            .excel-table th, .excel-table td {
+                border: 1px solid #ddd;
+                padding: 8px;
+                text-align: center;
+                position: relative;
+                min-width: 50px;
+                height: 25px;
+                box-sizing: border-box;
+            }
+            
+            /* 列标题样式 */
+            .excel-table .column-header {
+                background-color: #f2f2f2;
+                font-weight: bold;
+                user-select: none;
+            }
+            
+            /* 行标题样式 */
+            .excel-table .row-header {
+                background-color: #f2f2f2;
+                font-weight: bold;
+                user-select: none;
+            }
+            
+            /* 列调整大小手柄 */
+            .excel-table .resizer {
+                position: absolute;
+                right: 0;
+                top: 0;
+                width: 5px;
+                height: 100%;
+                background: rgba(0, 0, 0, 0);
+                cursor: col-resize;
+                z-index: 1;
+            }
+            
+            /* 行调整大小手柄 */
+            .excel-table .row-resizer {
+                position: absolute;
+                left: 0;
+                bottom: 0;
+                width: 100%;
+                height: 5px;
+                background: rgba(0, 0, 0, 0);
+                cursor: row-resize;
+                z-index: 1;
+            }
+            
+            /* 调整大小手柄悬停效果 */
+            .excel-table .resizer:hover, .excel-table .row-resizer:hover {
+                background: rgba(0, 0, 0, 0.1);
+            }
+            
+            /* 调整大小手柄激活状态 */
+            .excel-table .resizer.active, .excel-table .row-resizer.active {
+                background: rgba(0, 0, 0, 0.3);
+            }
+            
+            /* 左上角单元格样式 */
+            .excel-table .corner-cell {
+                background-color: #f2f2f2;
+            }
+            
+            /* 单元格输入框样式 */
+            .excel-table td input {
+                width: 100%;
+                height: 100%;
+                border: none;
+                outline: none;
+                box-sizing: border-box;
+                background: transparent;
+            }
+            
+            /* 选中单元格样式 */
+            .selected {
+                background-color: #b5d5ff;
+            }
+            
+            /* 选择锚点样式 */
+            .selection-anchor {
+                background-color: #7fbbff;
+            }
+            
+            /* 选择矩形样式 */
+            .selection-rect {
+                position: absolute;
+                background-color: rgba(181, 213, 255, 0.3);
+                border: 2px solid #4d90fe;
+                pointer-events: none;
+                z-index: 10;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+    
+    /**
+     * 初始化表格
+     */
+    init() {
+        this.createTableStructure();  // 创建表格结构
+        this.addColumnHeaders();      // 添加列标题
+        this.addRows();              // 添加行数据
+        this.setupResizers();        // 设置行列调整功能
+        this.setupMultSelect();      // 设置多选功能
+    }
+    
+    /**
+     * 创建表格基本结构
+     */
+    createTableStructure() {
+        // 创建容器元素
+        this.tableContainer = document.createElement('div');
+        this.tableContainer.className = 'excel-table-container';
+        
+        this.tableWrapper = document.createElement('div');
+        
+        this.table = document.createElement('table');
+        this.table.className = 'excel-table';
+        this.table.id = 'excelTable';
+        
+        // 创建表头和表体
+        this.thead = document.createElement('thead');
+        this.headerRow = document.createElement('tr');
+        this.tbody = document.createElement('tbody');
+        
+        // 组装表格结构
+        this.thead.appendChild(this.headerRow);
+        this.table.appendChild(this.thead);
+        this.table.appendChild(this.tbody);
+        this.tableWrapper.appendChild(this.table);
+        this.tableContainer.appendChild(this.tableWrapper);
+        
+        // 添加到目标容器
+        this.container.appendChild(this.tableContainer);
+    }
+    
+    /**
+     * 添加列标题
+     */
+    addColumnHeaders() {
+        // 添加左上角空白单元格
+        const cornerCell = document.createElement('th');
+        cornerCell.className = 'corner-cell';
+        this.headerRow.appendChild(cornerCell);
+        
+        // 添加A-Z列标题
+        for (let i = 0; i < this.columns; i++) {
+            const th = document.createElement('th');
+            th.className = 'column-header';
+            th.textContent = String.fromCharCode(65 + i);
+            
+            // 添加列宽调整手柄
+            const resizer = document.createElement('div');
+            resizer.className = 'resizer';
+            th.appendChild(resizer);
+            
+            this.headerRow.appendChild(th);
+        }
+    }
+    
+    /**
+     * 添加表格行
+     */
+    addRows() {
+        for (let i = 1; i <= this.rows; i++) {
+            const tr = document.createElement('tr');
+            
+            // 添加行标题
+            const th = document.createElement('th');
+            th.className = 'row-header';
+            th.textContent = i;
+            tr.appendChild(th);
+            
+            // 添加行高调整手柄
+            const rowResizer = document.createElement('div');
+            rowResizer.className = 'row-resizer';
+            th.appendChild(rowResizer);
+            
+            // 添加单元格
+            for (let j = 0; j < this.columns; j++) {
+                const td = document.createElement('td');
+                const input = document.createElement('input');
+                input.type = 'text';
+
+                // 设置行列信息
+                input.row = td.row = i;
+                input.col = td.col = String.fromCharCode(65 + j);
+                const cellKey = `${td.col}${td.row}`;
+                
+                // 初始化单元格数据
+                this.cellData[cellKey] = {
+                    value: '',          // 单元格值
+                    formula: '',       // 公式
+                    updateaction: this.action_null, // 更新函数
+                    updatecell: new Set(), // 依赖此单元格的单元格
+                    reqcell: new Set(),    // 此单元格依赖的单元格
+                    input: input,          // 输入框引用
+                    handle:this,
+                };
+
+                // 为Data对象定义属性，方便公式计算
+                Object.defineProperty(this.Data, cellKey, {
+                    get: () => this.cellData[cellKey].value,
+                    set: (v) => {
+                        v=v.toString();
+                        if (v.startsWith('=')) {
+                            // 处理公式
+                            const formula = v.substring(1);
+                            this.setCellFormula(this.cellData[cellKey], formula);
+                        } else {
+                            // 处理普通值
+                            this.setCellValue(this.cellData[cellKey], v);
+                        }
+                    }
+                });
+
+                // 输入框获取焦点事件
+                input.addEventListener('focus', () => {
+                    let cell=this.cellData[cellKey];
+                    this.selectCell = cell;
+                    this.selectCellKey = cellKey;
+                    cell.reqcell.forEach(e => e.updatecell.delete(cell));
+                    cell.reqcell.clear();
+                    if (this.cellData[cellKey].formula) {
+                        input.value = '=' + this.cellData[cellKey].formula;
+                    } else {
+                        input.value = this.cellData[cellKey].value;
+                    }
+                });
+                
+                // 输入框失去焦点事件
+                input.addEventListener('blur', (e) => {
+                    const inputValue = e.target.value.trim();
+                    
+                    if (inputValue.startsWith('=')) {
+                        // 处理公式
+                        const formula = inputValue.substring(1);
+                        this.setCellFormula(this.cellData[cellKey], formula);
+                    } else {
+                        // 处理普通值
+                        this.setCellValue(this.cellData[cellKey], inputValue);
+                    }
+                });
+                
+                td.appendChild(input);
+                tr.appendChild(td);
+            }
+            
+            this.tbody.appendChild(tr);
+        }
+    }
+    
+    /**
+     * 递归更新依赖此单元格的所有单元格
+     * @param {Object} cell - 单元格数据对象
+     */
+    callupdateCell(cell) {
+        cell.updatecell.forEach(e => {
+            if (e.action != this.action_null)
+                e.input.value = e.value = e.action(this.Data);
+            this.callupdateCell(e);
+        });
+    }
+
+    /**
+     * 递归查找依赖此单元格的所有单元格是否循环
+     * @param {Object} cell - 单元格数据对象
+     * @param {Object} targetcell - 目标单元格数据对象
+     */
+    hasCircularDependency(cell,targetcell){
+        let find=false;
+        cell.updatecell.forEach(e => {
+            if(find)return;
+            if(e==targetcell){find=true;return;}
+            if(this.hasCircularDependency(e,targetcell))find=true;
+        });
+        return find;
+    }
+    
+    /**
+     * 设置单元格值
+     * @param {Object} cell - 单元格数据对象
+     * @param {string} value - 要设置的值
+     */
+    setCellValue(cell, value) {
+        value=(!isNaN(parseFloat(value)) && !isNaN(value))?parseFloat(value):value;
+        // 清除现有的公式依赖
+        //cell.reqcell.forEach(e => e.updatecell.delete(cell));
+        //cell.reqcell.clear();
+        
+        // 更新单元格数据
+        cell.formula = '';
+        cell.value = value;
+        
+        // 更新显示
+        cell.input.value = value;
+        
+        // 更新依赖此单元格的所有单元格
+        this.callupdateCell(cell);
+    }
+
+    /**
+     * 设置单元格公式
+     * @param {Object} cell - 单元格数据对象
+     * @param {string} formula - 要设置的公式
+     */
+    setCellFormula(cell, formula) {
+        // 清除现有的公式依赖
+        //cell.reqcell.forEach(e => e.updatecell.delete(cell));
+        //cell.reqcell.clear();
+        
+        try {
+            // 解析公式并获取计算结果和依赖项
+            const { computedValue, computedAction, dependencies } = this.evaluateFormula(formula,cell);
+            
+            // 更新依赖关系
+            dependencies.forEach(e => {
+                cell.reqcell.add(e);
+                e.updatecell.add(cell);
+            });
+
+            // 更新单元格数据
+            cell.action = computedAction;
+            cell.formula = formula;
+            // 更新显示
+            cell.input.value = cell.value = computedValue;
+            if(this.hasCircularDependency(cell,cell)){
+                cell.input.value = cell.value = '#CIRCULAR!';
+                cell.reqcell.forEach(e => e.updatecell.delete(cell));
+                cell.reqcell.clear();
+                return;
+            }
+            
+            
+
+            // 更新依赖此单元格的所有单元格
+            this.callupdateCell(cell);
+        } catch (error) {
+            // 公式错误处理
+            cell.input.value = cell.value = '#ERROR!';
+            console.error('Formula error:', error);
+        }
+    }
+
+    /**
+     * 计算公式（支持单元格引用、范围运算符和系统函数）
+     * @param {string} formula - 要计算的公式字符串
+     * @returns {Object} 返回包含计算结果、计算函数和依赖项的对象
+     */
+    evaluateFormula(formula,cell) {
+        const dependencies = new Set();
+        let computedValue = '';
+        let computedAction = null;
+        
+        try {
+            // 词法分析并处理范围运算符
+            const tokens = this.tokenizeFormula(formula);
+            let processedFormula = '';
+            let i = 0;
+            
+            while (i < tokens.length) {
+                const token = tokens[i];
+                
+                // 处理范围运算符（如 A1:A3）
+                if (i + 2 < tokens.length && tokens[i + 1] === ':' && this.isCellReference(token) && this.isCellReference(tokens[i + 2])) {
+                    const rangeArray = this.processRange(token, tokens[i + 2]);
+                    processedFormula += rangeArray.code;
+                    rangeArray.deps.forEach(dep => dependencies.add(dep));
+                    i += 3; // 跳过已处理的3个token（A1 : A3）
+                } 
+                // 处理普通单元格引用
+                else if (this.isCellReference(token)) {
+                    const { code, dep } = this.processCellRef(token);
+                    processedFormula += code;
+                    if (dep) dependencies.add(dep);
+                    i++;
+                }
+                // 处理系统函数
+                else if (this.isSystemFunction(token)) {
+                    processedFormula += this.processSystemFunction(token);
+                    i++;
+                }
+                // 处理主动函数
+                else if (this.isActionFunction(token)) {
+                    while(tokens[i+1]!='('){i++;if(i+1==tokens.length)return null;}
+                    let num=[];                    
+                    i+=2;
+                    while(tokens[i]!=')'){
+                        if(tokens[i]!=',')num.push(tokens[i]);
+                        i++;
+                        if(i+1==tokens.length)return null;
+                    }
+                    this.actionCall[token](cell,...num);
+                    i+=1;
+                }
+                // 其他字符
+                else {
+                    processedFormula += token;
+                    i++;
+                }
+            }
+            
+            // 创建计算函数
+            computedValue = processedFormula;
+            computedAction = new Function('$', `return (${computedValue})`);
+            
+            // 执行计算
+            computedValue = computedAction(this.Data);
+        } catch (error) {
+            throw new Error(`公式计算错误: ${formula}\n错误详情: ${error.message}`);
+        }
+        
+        return { computedValue, computedAction, dependencies };
+    }
+
+    /**
+     * 处理范围运算符（如 A1:A3）
+     * @param {string} startCell - 起始单元格（如"A1"） 
+     * @param {string} endCell - 结束单元格（如"A3"）
+     * @returns {Object} 包含生成的代码和依赖项
+     */
+    processRange(startCell, endCell) {
+        const deps = new Set();
+        const cells = this.getCellsInRange(startCell, endCell);
+        let code = '[';
+        
+        cells.forEach((cell, index) => {
+            const targetCell = this.cellData[cell];
+            if (targetCell) {
+                deps.add(targetCell);
+                code += `$.${cell}`;
+            } else {
+                code += 'null';
+            }
+            if (index < cells.length - 1) code += ',';
+        });
+        
+        code += ']';
+        return { code, deps };
+    }
+
+    /**
+     * 获取范围内的所有单元格（如 A1:A3 → ["A1","A2","A3"]）
+     * @param {string} start - 起始单元格
+     * @param {string} end - 结束单元格
+     * @returns {Array} 单元格数组
+     */
+    getCellsInRange(start, end) {
+        // 解析列字母和行号（如"A1" → {col: 'A', row: 1}）
+        const parseCell = (cell) => ({
+            col: cell.match(/[A-Z]+/)[0],
+            row: parseInt(cell.match(/\d+/)[0])
+        });
+        
+        const startCell = parseCell(start);
+        const endCell = parseCell(end);
+        const cells = [];
+        
+        //// 仅支持同列范围（如A1:A3）
+        //if (startCell.col !== endCell.col) {
+        //    throw new Error(`目前仅支持单列范围（如A1:A3），实际收到：${start}:${end}`);
+        //}
+        const starcol=startCell.col.charCodeAt();
+        const endcol=endCell.col.charCodeAt();
+        for (let col = starcol; col <= endcol; col++) {   
+            // 生成范围内所有单元格
+            for (let row = startCell.row; row <= endCell.row; row++) {
+                cells.push(`${String.fromCharCode(col)}${row}`);
+            }
+        }
+        
+        return cells;
+    }
+
+    /**
+     * 处理普通单元格引用
+     * @param {string} cellKey - 单元格键（如"A1"）
+     * @returns {Object} 包含生成的代码和依赖项
+     */
+    processCellRef(cellKey) {
+        const targetCell = this.cellData[cellKey];
+        if (targetCell) {
+            return { code: `$.${cellKey}`, dep: targetCell };
+        }
+        return { code: 'null', dep: null };
+    }
+
+    /**
+     * 公式词法分析器
+     * @param {string} formula - 待分析的公式字符串
+     * @returns {Array} 返回词法单元数组
+     */
+    tokenizeFormula(formula) {
+        const tokens = [];     // 存储词法单元
+        let currentToken = ''; // 当前正在分析的词法单元
+        let inString = false;  // 是否在字符串中
+        
+        for (let i = 0; i < formula.length; i++) {
+            const char = formula[i];
+            
+            if (char === '"') {
+                // 处理字符串字面量
+                inString = !inString;
+                currentToken += char;
+                if (!inString) {
+                    tokens.push(currentToken);
+                    currentToken = '';
+                }
+            } else if (inString) {
+                // 字符串内容直接保留
+                currentToken += char;
+            } else if (char.match(/[A-Za-z]/)) {
+                // 处理字母（可能是单元格引用或函数名）
+                currentToken += char;
+            } else if (char.match(/[0-9]/) && currentToken.match(/[A-Za-z]$/)) {
+                // 处理字母后的数字（形成单元格引用）
+                currentToken += char;
+            } else if (char.match(/[+\-*/%^&=<>!,():]/)) {
+                // 处理运算符和分隔符
+                if (currentToken) {
+                    tokens.push(currentToken);
+                    currentToken = '';
+                }
+                tokens.push(char);
+            } else if (char.trim() === '') {
+                // 忽略空白字符（字符串内除外）
+                if (currentToken) {
+                    tokens.push(currentToken);
+                    currentToken = '';
+                }
+            } else {
+                // 其他字符
+                currentToken += char;
+            }
+        }
+        
+        // 处理最后一个词法单元
+        if (currentToken) {
+            tokens.push(currentToken);
+        }
+        
+        return tokens;
+    }
+
+    /**
+     * 判断是否为单元格引用
+     * @param {string} token - 待检查的词法单元
+     * @returns {boolean} 如果是A1、B2这类格式返回true
+     */
+    isCellReference(token) {
+        return /^[A-Z]\d+$/.test(token);
+    }
+
+    /**
+     * 判断是否为系统函数
+     * @param {string} token - 待检查的词法单元
+     * @returns {boolean} 如果是系统函数返回true
+     */
+    isSystemFunction(token) {
+        return this.systemIdentifier && 
+            typeof this.systemIdentifier === 'object' && 
+            token in this.systemIdentifier;
+    }
+
+    /**
+     * 判断是否为系统函数
+     * @param {string} token - 待检查的词法单元
+     * @returns {boolean} 如果是系统函数返回true
+     */
+     isActionFunction(token) {
+        return this.actionCall && 
+            typeof this.actionCall === 'object' && 
+            token in this.actionCall;
+    }
+
+    /**
+     * 处理系统函数
+     * @param {string} token - 系统函数名称
+     * @returns {string} 返回可执行的函数字符串
+     */
+    processSystemFunction(token) {
+        if (!this.systemIdentifier || !this.systemIdentifier[token]) {
+            return 'null';  // 未定义的函数返回null
+        }
+        
+        // 获取系统函数实现
+        const func = this.systemIdentifier[token];
+        
+        // 返回函数调用字符串
+        return `(${func.toString()})`;
+    }
+    
+    /**
+     * 设置行列调整功能
+     */
+    setupResizers() {
+        // 列宽调整
+        const columnResizers = this.table.querySelectorAll('.resizer');
+        columnResizers.forEach(resizer => {
+            resizer.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                const th = resizer.parentElement;
+                let startX = e.clientX;
+                let startWidth = th.offsetWidth;
+                resizer.classList.add('active');
+                
+                const resizeColumn = (e) => {
+                    const th = resizer.parentElement;
+                    const newWidth = startWidth + (e.clientX - startX);
+                    th.style.width = `${newWidth}px`;
+                    th.style.minWidth = `${newWidth}px`;
+                    this.updateSelectionRect();
+                };
+                
+                const stopResize = () => {
+                    resizer.classList.remove('active');
+                    document.removeEventListener('mousemove', resizeColumn);
+                    document.removeEventListener('mouseup', stopResize);
+                };
+
+                document.addEventListener('mousemove', resizeColumn);
+                document.addEventListener('mouseup', stopResize);
+            });
+        });
+        
+        // 行高调整
+        const rowResizers = this.table.querySelectorAll('.row-resizer');
+        rowResizers.forEach(resizer => {
+            resizer.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                const tr = resizer.closest('tr');
+                let startY = e.clientY;
+                let startHeight = tr.offsetHeight;
+                resizer.classList.add('active');
+                
+                const resizeRow = (e) => {
+                    const tr = resizer.closest('tr');
+                    const newHeight = startHeight + (e.clientY - startY);
+                    tr.style.height = `${newHeight}px`;
+                    tr.querySelectorAll('td').forEach(td => {
+                        td.style.height = `${newHeight}px`;
+                    });
+                    this.updateSelectionRect();
+                };
+                
+                const stopResize = () => {
+                    resizer.classList.remove('active');
+                    document.removeEventListener('mousemove', resizeRow);
+                    document.removeEventListener('mouseup', stopResize);
+                };
+                
+                document.addEventListener('mousemove', resizeRow);
+                document.addEventListener('mouseup', stopResize);
+            });
+        });
+    }
+
+    /**
+     * 更新选择矩形的位置和大小
+     * @param {HTMLElement} [cell1] - 起始单元格
+     * @param {HTMLElement} [cell2] - 结束单元格
+     */
+    updateSelectionRect(cell1, cell2) {
+        this.startCell = cell1 ? cell1 : this.startCell;
+        this.endCell = cell2 ? cell2 : this.endCell;
+        
+        if (!this.startCell || !this.endCell) return;
+
+        // 计算两个单元格的边界矩形
+        const rect1 = this.startCell.getBoundingClientRect();
+        const rect2 = this.endCell.getBoundingClientRect();
+        const rect3 = this.container.getBoundingClientRect();
+        
+        // 计算包含两个单元格的矩形区域
+        const left = Math.min(rect1.left, rect2.left);
+        const top = Math.min(rect1.top, rect2.top);
+        const width = Math.max(rect1.right, rect2.right) - left;
+        const height = Math.max(rect1.bottom, rect2.bottom) - top;
+        
+        // 更新选择矩形样式
+        this.selectionRect.style.left = `${left-rect3.left}px`;
+        this.selectionRect.style.top = `${top-rect3.top}px`;
+        this.selectionRect.style.width = `${width - 0}px`;
+        this.selectionRect.style.height = `${height - 0}px`;
+    }
+
+    /**
+     * 设置多选功能
+     */
+    setupMultSelect() {
+        // 鼠标按下事件 - 开始选择
+        this.container.addEventListener('mousedown', (e) => {
+            if(e.button==1){
+                e.preventDefault(); // 防止文本选择
+                return;
+            }
+            this.selectionRect.style.display = 'none';
+
+            // 获取鼠标下的元素
+            const mouseX = e.clientX;
+            const mouseY = e.clientY;
+            const elementUnderMouse = document.elementFromPoint(mouseX, mouseY);
+            const currentCell = elementUnderMouse.closest('td');
+            
+            if (currentCell == null) return;
+            
+            this.isSelecting = true;
+            this.endCell = this.startCell = currentCell;
+            this.updateSelectionRect();
+            
+        });
+        
+        // 鼠标移动事件 - 更新选择区域
+        document.addEventListener('mousemove', (e) => {
+            if (!this.isSelecting) return;
+            
+            // 获取鼠标下的元素
+            const mouseX = e.clientX;
+            const mouseY = e.clientY;
+            const elementUnderMouse = document.elementFromPoint(mouseX, mouseY);
+            const currentCell = elementUnderMouse.closest('td');
+            
+            if (currentCell && currentCell !== this.startCell) {
+                this.endCell = currentCell;
+                this.updateSelectionRect();
+            }
+            
+            // 根据选择区域大小决定是否显示选择矩形
+            if (this.startCell != this.endCell) {
+                if (this.selectionRect.style.display != 'block')
+                    this.selectionRect.style.display = 'block';
+            } else {
+                this.selectionRect.style.display = 'none';
+            }
+        });
+        
+        // 鼠标释放事件 - 结束选择
+        document.addEventListener('mouseup', () => {
+            if (!this.isSelecting) return;
+            
+            this.isSelecting = false;
+            
+            // 如果只选择了一个单元格，则聚焦到该单元格
+            if (this.startCell == this.endCell) {
+                this.startCell.children[0].focus();
+                this.selectionRect.style.display = 'none';
+            }
+        });
+    }
+}
+        
+</script>
+
+<style>
+    .pospanel span{
+        font-size: 0.8em;
+        position: absolute;
+        user-select: none;
+    }
+    .pospanel input[type='text']{
+        font-size: 0.8em;
+        width: 100px;
+        position: absolute;
+        border: 1px solid #000;
+    }
+
+    .pospanel input[type='checkbox']{
+        font-size: 0.8em;
+        position: absolute;
+        border: 1px solid #000;
+    }
+    .pospanel select{
+        border: 1px solid #000;
+        font-size: .8em;
+        position: absolute;
+        width: 100px;
+    }
+    
+    .pospanel button{
+        position: absolute;
+        user-select: none;
+    }
+
+    .pospanel input[type='range']{
+        font-size: 0.8em;
+        width: 100px;
+        position: absolute;
+        border: 1px solid #000;
+    }
+    /*
+    .pospanel input[type='range']::after{
+        content: var(--v);
+        position: absolute;
+        left: 105%;
+    }*/
+    .pospanel input[type='number']{
+        font-size: 0.8em;
+        width: 100px;
+        position: absolute;
+        border: 1px solid #000;
+        -moz-appearance: textfield; /* Firefox */
+        appearance: textfield;
+    }
+
+    .pospanel input[type='number']::-webkit-inner-spin-button,
+    .pospanel input[type='number']::-webkit-outer-spin-button{
+        -webkit-appearance: none;
+        margin: 0;
+    }
+    .pospanel textarea{
+        /*
+        line-height: 21px;
+        overflow-y: auto; 
+        */
+        width: 100px;
+        height: 20px;
+        position: absolute;
+        background: #ffffff;
+        color: #000;
+        border: 1px solid #000;
+        outline: none;
+        resize: none;
+    }
+    .pospanel canvas{
+        position: absolute;
+        border: 1px solid #000;
+    }
+    .editdiv{
+        border: 1px solid #000;
+        font-size: .8em;
+        position: absolute;
+        width: 100px;
+        height: 20px;
+        background-color: #fff;
+    }
+</style>
+
+<script>
+    
+    (()=>{
+        excelpanel=DragDiv.create(document.querySelector(".mainpanel"),'Data',800,600,true,true);
+        excelTable = new ExcelTable(excelpanel.panel, 20, 26); 
+        excelpanel.panel.style.backgroundColor='#fff';
+        excelpanel.hide();
+        
+        debugpanel=DragDiv.create(document.querySelector(".mainpanel"),'debug',800,600,true,true);
+        debugpanel.hide();
+        debugpanel.panel.innerHTML=`<div style="width: 100%;height: 100%;background-color: #3be;"><div style="width: 100%;height: 100%;"></div></div>`;
+        debugentity=[];
+
+        let h1=debugpanel.panel.children[0];//顶层拖动遮罩
+        let h2=h1.children[0];//底层实例
+        h2.classList.add('pospanel');
+        let h3=DragDiv.MultiSelect(h2);
+        设备=new Databind();
+        let newentity=(div)=>{
+            let item=DragDiv.create(div,'',100,20,false,true,true);
+            item.titlediv.style.display='none';
+            item.style.boxShadow='none';
+            item.style.border='1px solid #0004';
+            return item;
+        }
+        let paneldivcreate={
+            'button'    :(x,y,item)=>{
+                    if(item==null)item=newentity(h1);
+                    item.left=x;
+                    item.top=y;
+                    item.divname='button';
+                    let sp=document.createElement('button');
+                    sp.innerText='123';
+                    h2.appendChild(sp);
+                    sp.style.left=item.style.left=`${x}px`;
+                    sp.style.top=item.style.top=`${y}px`;
+                    item.ondivclose=()=>设备.removeControl(sp);
+                    item.ondivresize=(r)=>{
+                        sp.style.left=item.style.left;
+                        sp.style.top=item.style.top;
+                        sp.style.width=item.style.width;
+                        sp.style.height=item.style.height;
+                    }
+                    item.onmovedrag=()=>{
+                        sp.style.left=`${item.left}px`;
+                        sp.style.top=`${item.top}px`;
+                    }
+                    item.setvalue=(val)=>{
+                        const vals=val.split(',')
+                        sp.innerText=item.val=vals[0];
+                        if(vals.length>1)
+                        {
+                            sp.setAttribute('value',vals[1]);
+                            sp.onclick=()=>{
+                                if(sp.getAttribute('id')==null)return;
+                                设备[sp.getAttribute('id')]=eval(sp.getAttribute('value'));
+                            }
+                        }
+                        
+                    }
+                    item.entity=sp;
+                    return item;
+                },
+            'span'      :(x,y,item)=>{
+                    if(item==null)item=newentity(h1);
+                    item.left=x;
+                    item.top=y;
+                    item.divname='span';
+                    let sp=document.createElement('span');
+                    sp.innerText='123';
+                    h2.appendChild(sp);
+                    sp.style.left=item.style.left=`${x}px`;
+                    sp.style.top=item.style.top=`${y}px`;
+                    item.ondivclose=()=>设备.removeControl(sp);
+                    item.onmovedrag=()=>{
+                        sp.style.left=`${item.left}px`;
+                        sp.style.top=`${item.top}px`;
+                    }
+                    item.setvalue=(val)=>{
+                        item.val=val;
+                        sp.setAttribute('format',val);
+                        sp.innerText=val;
+                    }
+                    item.entity=sp;
+                    return item;
+                },
+            'select'    :(x,y,item)=>{
+                    if(item==null)item=newentity(h1);
+                    item.left=x;
+                    item.top=y;
+                    item.divname='select';
+                    let sp=document.createElement('select');
+                    h2.appendChild(sp);
+                    sp.style.left=item.style.left=`${x}px`;
+                    sp.style.top=item.style.top=`${y}px`;
+                    item.ondivclose=()=>设备.removeControl(sp);
+                    item.ondivresize=(r)=>{
+                        sp.style.left=item.style.left;
+                        sp.style.top=item.style.top;
+                        sp.style.width=item.style.width;
+                    }
+                    item.onmovedrag=()=>{
+                        sp.style.left=`${item.left}px`;
+                        sp.style.top=`${item.top}px`;
+                    }
+                    item.setvalue=(val)=>{
+                        item.val=val;
+                        let code=`({${val}})`;
+                        val=eval(code);
+                        let opt='';
+                        sp.kvt=val;
+                        sp.setAttribute('kvt',code);
+                        for (const [k,v] of Object.entries(val)) {
+                            opt+=`<option>${k}</option>`;
+                        }
+                        sp.innerHTML=opt;
+                    }
+                    item.entity=sp;
+                    return item;
+                },
+            'number'    :(x,y,item)=>{
+                    if(item==null)item=newentity(h1);
+                    item.left=x;
+                    item.top=y;
+                    item.divname='number';
+                    let sp=document.createElement('input');
+                    sp.type='number';
+                    sp.innerText='123';
+                    h2.appendChild(sp);
+                    sp.style.left=item.style.left=`${x}px`;
+                    sp.style.top=item.style.top=`${y}px`;
+                    item.ondivclose=()=>设备.removeControl(sp);
+                    item.ondivresize=(r)=>{
+                        sp.style.left=item.style.left;
+                        sp.style.top=item.style.top;
+                        sp.style.width=item.style.width;
+                    }
+                    item.onmovedrag=()=>{
+                        sp.style.left=`${item.left}px`;
+                        sp.style.top=`${item.top}px`;
+                    }
+                    item.setvalue=(val)=>(sp.innerText=val);
+                    item.entity=sp;
+                    return item;
+                },
+            'range'     :(x,y,item)=>{
+                    if(item==null)item=newentity(h1);
+                    item.left=x;
+                    item.top=y;
+                    item.divname='range';
+                    let sp=document.createElement('input');
+                    sp.type='range';
+                    sp.value='123';
+                    sp.max=100;
+                    sp.min=0;
+                    h2.appendChild(sp);
+                    sp.style.left=item.style.left=`${x}px`;
+                    sp.style.top=item.style.top=`${y}px`;
+                    item.ondivclose=()=>设备.removeControl(sp);
+                    item.ondivresize=(r)=>{
+                        sp.style.left=item.style.left;
+                        sp.style.top=item.style.top;
+                        sp.style.width=item.style.width;
+                    }
+                    item.onmovedrag=()=>{
+                        sp.style.left=`${item.left}px`;
+                        sp.style.top=`${item.top}px`;
+                    }
+                    item.setvalue=(val)=>{
+                        item.val=val;
+                        val=eval(val);
+                        sp.value=val[0];
+                        sp.min=val[1];
+                        sp.max=val[2];
+                    }
+                    item.entity=sp;
+                    return item;
+                },
+            'textarea'  :(x,y,item)=>{
+                    if(item==null)item=newentity(h1);
+                    item.left=x;
+                    item.top=y;
+                    item.divname='textarea';
+                    let sp=document.createElement('textarea');
+                    sp.value='123';
+                    h2.appendChild(sp);
+                    sp.style.left=item.style.left=`${x}px`;
+                    sp.style.top=item.style.top=`${y}px`;
+                    item.ondivclose=()=>设备.removeControl(sp);
+                    item.ondivresize=(r)=>{
+                        sp.style.left=item.style.left;
+                        sp.style.top=item.style.top;
+                        sp.style.width=item.style.width;
+                        sp.style.height=item.style.height;
+                    }
+                    item.onmovedrag=()=>{
+                        sp.style.left=`${item.left}px`;
+                        sp.style.top=`${item.top}px`;
+                    }
+                    item.setvalue=(val)=>{
+                        item.value=val;
+                    }
+                    item.entity=sp;
+                    return item;
+                },
+            'checkbox'  :(x,y,item)=>{
+                    if(item==null)item=newentity(h1);
+                    item.left=x;
+                    item.top=y;
+                    item.divname='checkbox';
+                    let sp=document.createElement('input');
+                    sp.type='checkbox';
+                    h2.appendChild(sp);
+                    sp.style.left=item.style.left=`${x}px`;
+                    sp.style.top=item.style.top=`${y}px`;
+                    item.ondivclose=()=>设备.removeControl(sp);
+                    item.onmovedrag=()=>{
+                        sp.style.left=`${item.left}px`;
+                        sp.style.top=`${item.top}px`;
+                    }
+                    item.setvalue=(val)=>{
+                        sp.checked=val|0;
+                    }
+                    item.entity=sp;
+                    return item;
+                },
+            'canvas'    :(x,y,item)=>{
+                    if(item==null)item=newentity(h1);
+                    item.left=x;
+                    item.top=y;
+                    item.divname='canvas';
+                    let sp=document.createElement('canvas');
+                    sp.value='123';
+                    h2.appendChild(sp);
+                    sp.style.left=item.style.left=`${x}px`;
+                    sp.style.top=item.style.top=`${y}px`;
+                    sp.style.width=item.style.width=`300px`;
+                    sp.style.height=item.style.height=`150px`;
+                    sp.width=300;
+                    sp.height=150;
+                    sp.chart=new Chart(sp);
+                    Object.defineProperty(sp, 'value', {
+                        get: ()=>0,
+                        set: function(v) {
+                            sp.chart.AddPoint(v);
+                        }
+                    });
+                    item.ondivclose=()=>设备.removeControl(sp);
+                    item.ondivresize=(r)=>{
+                        sp.style.left=item.style.left;
+                        sp.style.top=item.style.top;
+                        sp.style.width=item.style.width;
+                        sp.style.height=item.style.height;
+                        sp.chart.width=sp.width=item.style.width.replace('px','')|0;
+                        sp.chart.height=sp.height=item.style.height.replace('px','')|0;
+                    }
+                    item.onmovedrag=()=>{
+                        sp.style.left=`${item.left}px`;
+                        sp.style.top=`${item.top}px`;
+                    }
+                    item.setvalue=(val)=>{
+                        item.value=val;
+                    }
+                    item.entity=sp;
+                    return item;
+                },
+
+        };
+
+        let newtypediv=(x,y,name)=>{
+            if(!paneldivcreate[name])return;
+            let item=newentity(h1);
+            item.clone=paneldivcreate[name];
+            item.clone(x,y,item);
+            debugentity.push(item);
+        };
+        let clonetypediv=(x)=>{
+            let item=x.clone(x.left,x.top);
+            item.clone=x.clone;
+            item.style.width=x.style.width;
+            item.style.height=x.style.height;
+            item.ondivresize();
+            if(x.val!=null)item.setvalue(x.val);
+            debugentity.push(item);
+            return item;
+        }
+        let unbindkey=(item)=>{
+            if(item.bindcell){
+                let cell=item.bindcell;
+                cell.reqcell.forEach(e => e.updatecell.delete(cell));
+                cell.reqcell.clear();
+                设备.offIdUpdate(cell.id,cell.bindcall);
+                item.bindcell=null;
+            }
+        };
+        let bindkey=(item,id)=>{
+            item.rawsetid=id;
+            //与excel table双向绑定
+            let cell=item.bindcell;
+            unbindkey(item);
+            if(/^[A-Z]\d+$/.test(id)){
+                const e=excelTable.cellData[id];
+                if(e){
+                    cell=cell?cell:{
+                        value: '',          // 单元格值
+                        formula: '',       // 公式
+                        updateaction: this.action_null, // 更新函数
+                        updatecell: new Set(), // 依赖此单元格的单元格
+                        reqcell: new Set(),    // 此单元格依赖的单元格
+                        input: {value:0},          // 输入框引用
+                        handle:excelTable,
+                    };
+                    cell.reqcell.add(e);
+                    e.updatecell.add(cell);
+                    cell.id=id;
+                    cell.action=($)=>(设备.setValue(id,$[id]));
+                    cell.bindcall=(v)=>{e.value=e.input.value=v;e.handle.callupdateCell(e);};
+                    设备.onIdUpdate(id,cell.bindcall);
+                    item.bindcell=cell;
+                }
+            }
+            //---------------------------------
+            item.entity && (item.entity.setAttribute('id',id)|1) && (设备.bind(id,item.entity));
+        };
+        let typedivsetvalue=(item,value)=>{
+            item.rawsetvalue=value;
+            item.setvalue && item.setvalue(value);
+        };
+        let builddata=()=>{
+            let paneldata=[];
+            for (let i = 0; i < debugentity.length; i++) {
+                const e = debugentity[i];
+                paneldata.push(e.divname);
+                paneldata.push(e.style.left.replace('px',''));
+                paneldata.push(e.style.top.replace('px',''));
+                paneldata.push(e.style.width.replace('px',''));
+                paneldata.push(e.style.height.replace('px',''));
+                paneldata.push(e.rawsetid);
+                paneldata.push(e.rawsetvalue);
+            }
+            return paneldata;
+        };
+        let panelmenu=new ContextMenu(debugpanel,[
+            {label:'button'  ,action:(e,div,menu)=>newtypediv(menu.x,menu.y,div.innerText)},
+            {label:'span'    ,action:(e,div,menu)=>newtypediv(menu.x,menu.y,div.innerText)},
+            {label:'select'  ,action:(e,div,menu)=>newtypediv(menu.x,menu.y,div.innerText)},
+            {label:'number'  ,action:(e,div,menu)=>newtypediv(menu.x,menu.y,div.innerText)},
+            {label:'range'   ,action:(e,div,menu)=>newtypediv(menu.x,menu.y,div.innerText)},
+            {label:'textarea',action:(e,div,menu)=>newtypediv(menu.x,menu.y,div.innerText)},
+            {label:'checkbox',action:(e,div,menu)=>newtypediv(menu.x,menu.y,div.innerText)},
+            {label:'canvas'  ,action:(e,div,menu)=>newtypediv(menu.x,menu.y,div.innerText)},
+            
+            {label:'隐藏编辑',action:()=>{
+                Array.from(h1.children).forEach(e=>{
+                    e.hide && e.hide();
+                });
+                h3.enable=false;
+            }},
+            {label:'显示编辑',action:()=>{
+                Array.from(h1.children).forEach(e=>{
+                    e.show && e.show();
+                });
+                h3.enable=true;
+            }},
+            {text:'20',label:'网格拖动',action:(e,div,menu)=>{
+                const step=div.children[0].value;
+                DragDiv.Step(step);
+            }},
+            {label:'像素拖动',action:()=>{
+                DragDiv.Step(null);
+            }},
+            {label:'复制',action:()=>{
+                let list=[];
+                DragDiv.Selects().forEach(x=>{
+                    list.push(clonetypediv(x));
+                });
+                DragDiv.Selects(list);
+            }},
+            {label:'删除',action:()=>{
+                DragDiv.Selects().forEach(x=>{
+                    debugentity = debugentity.filter(item => item != x);
+                    unbindkey(x);
+                    x.close();
+                });
+            }},
+            {text:'',label:'->ID',action:(e,div,menu)=>{
+                let id=div.children[0].value;
+                console.log(`set id:${id}`);
+                let v=DragDiv.Selects();
+                if(!v.length)return;
+                bindkey(v[0],id);
+                
+            }},
+            {text:'',label:'->值',action:(e,div,menu)=>{
+                console.log(`set val:${div.children[0].value}`);
+                let v=DragDiv.Selects();
+                if(!v.length)return;
+                typedivsetvalue(v[0],div.children[0].value);
+            }},
+            {label:'导出'  ,action:(e,div,menu)=>console.log(builddata())},
+        ]);
+        
+        panelmenu.ondrop=()=>{
+            console.log(DragDiv.Selects());
+        };
+
+        let lastselectcell;
+
+        let debugpanelmenu=new ContextMenu(excelpanel.panel,[
+            {text:'',label:'添加变量',action:(e,div,menu)=>{
+                if(!lastdownloadinfo)return;
+                if(!lastdownloadinfo.symbol)return;
+                let name=div.children[0].value;
+                if(!lastdownloadinfo.symbol[name])return;
+                excelTable.Data[excelTable.selectCellKey]=`=TIMER(1)(SWD.ReadData(${lastdownloadinfo.symbol[name].st_value}).then(e=>($.map.${name}=e)))|0+$.map.${name}`; ;
+            }},
+            {text:'',label:'添加变量地址',action:(e,div,menu)=>{
+                if(!lastdownloadinfo)return;
+                if(!lastdownloadinfo.symbol)return;
+                let name=div.children[0].value;
+                if(!lastdownloadinfo.symbol[name])return;
+                excelTable.Data[excelTable.selectCellKey]=lastdownloadinfo.symbol[name].st_value;
+            }},
+        ]);
+        debugpanelmenu.ondrop=()=>{
+            lastselectcell=excelTable.selectCell;
+            console.log(lastselectcell);
+            
+        };
+        const saveinfo=new URLSearchParams(window.location.search);
+
+    })();
+</script>
+
+
+<script>
+    var BLECOM;
+    var USBCOM;
+    var otherCOM;
+    var STLINKSWD=new STLINK();
+    var UARTSWD;//串口SWD
+    var COM=null;//接口实例
+    var SWD=null;//SWD实例
+    var autodownload=document.getElementById('autodownload');
+    var output=document.getElementById('outputtext');
+    var wbt=document.getElementById('wdbt');
+    var wrg=document.getElementById('wdrang');
+    var fileInput=document.getElementById('fileInput');
+    var dirselect=document.getElementById('dirselect');
+    var flmlist=document.getElementById('flmselect');
+    var flmupload=document.getElementById('flmupload');
+    var romselect=document.getElementById('romselect');
+    var romfit=document.getElementById('romfit');
+    var startdownload=document.getElementById('startdownload');
+    var lastdownloadinfo=null;
+    var rommap={};
+    var romlist={
+    };
+
+    function selectdevice(name){
+        switch(name){
+            case 'UART':
+                COM=USBCOM;
+                SWD.COM=COM;
+                break;
+            case 'BLE':
+                COM=BLECOM;
+                SWD.COM=COM;
+                break;
+            case 'STLINK':
+                COM=otherCOM;
+                break;
+        }
+    }
+
+    function newflm(flmname){
+        let exists = false;
+        for (let i = 0; i < flmlist.options.length; i++) {
+            if (flmlist.options[i].text === flmname) {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists) {
+            let opt = document.createElement('option');
+            opt.text = flmname;
+            flmlist.appendChild(opt);
+        }
+    }
+
+    function setUploadRate(rate){
+        if(rate<0){
+            flmupload.parentElement.style.display = 'none';
+        } else {
+            flmupload.parentElement.style.display = 'flex';
+        }
+        let v=rate*100;
+        flmupload.value = v>flmupload.max?flmupload.max:v;
+    }
+
+
+    function convertToBase64(list) {
+        // Example Uint8Array
+        const uint8Array = new Uint8Array(list);
+        
+        // Convert Uint8Array to Base64
+        const base64String = btoa(String.fromCharCode(...uint8Array));
+        
+        return base64String;
+    }
+
+    function convertToUint8Array(str) {
+        // Get Base64 string from input
+        const base64String = str;
+        
+        // Decode Base64 string to binary string
+        const binaryString = atob(base64String);
+        
+        // Convert binary string to Uint8Array
+        const uint8Array = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+            uint8Array[i] = binaryString.charCodeAt(i);
+        }
+        
+        return uint8Array;
+    }
+
+
+    function loadjs(url,callback=()=>{}){
+        var script = document.createElement('script');
+        script.type = 'text/javascript';
+        script.src = url;
+        script.onload = callback;
+        document.head.appendChild(script);
+    }
+
+    function loadrom(){
+        romfit.value=romselect.value;
+        if(rommap[romselect.value])return;
+        startdownload.innerText='加载ROM中...'
+        var script = document.createElement('script');
+        script.type = 'text/javascript';
+        script.src = romlist[romselect.value];
+        script.onload = ()=>{
+            startdownload.innerText='下载'
+            rommap[romselect.value]=convertToUint8Array(rommap[romselect.value]);
+        };
+        document.head.appendChild(script);
+    }
+
+    function filterSelect() {
+        const filter = romfit.value.toUpperCase();
+        const select = romselect;
+
+        let html='';
+        for (const [k,v] of Object.entries(romlist)) {
+            if(k.includes(filter))
+                html+=`<option>${k}</option>`;
+        }
+        select.innerHTML=html;
+        select.selectedIndex=-1;
+    }
+
+    function detectDevice() {
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        return isMobile;
+    }
+
+    function downloadselect(){
+        if(rommap[romselect.value]){
+            download_selectDevice(rommap[romselect.value]);
+        }
+        else if(lastdownloadinfo && lastdownloadinfo.ROM){
+            download_selectDevice(lastdownloadinfo.ROM);
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        
+        setTimeout(() => {
+            loadjs('data/list.js',()=>{
+                romfit.value='';
+                romfit.dispatchEvent(new Event('input',{bubbles:true,cancelable:true}));
+            });
+        }, 500);
+        
+        flmlist.addEventListener('change', function() {
+            download_selectDevice = download_device[flmlist.value];
+            uploadspi=upload_device[flmlist.value];
+            uploadspi=uploadspi&&uploadspi||(()=>{});
+        });
+
+
+        let sendbtn=document.getElementById('com_open_btn');
+        BLECOM=new BLEUART((h,b)=>{
+            if(b){
+                SWD=UARTSWD;
+                sendbtn.innerText="断开设备";
+            }
+            else
+                sendbtn.innerText="连接设备";
+        });
+        USBCOM=new COMHelper((h,b)=>{
+            if(b){
+                SWD=UARTSWD;
+                SWD.packetsize=0;
+                sendbtn.innerText="断开设备";
+            }
+            else
+                sendbtn.innerText="连接设备";
+        });
+        //STLINKSWD=new STLINK();
+        otherCOM={
+            open:function(){
+                STLINKSWD.OnstatusChange=(h,b)=>{
+                    if(b){
+                        SWD=STLINKSWD;
+                        sendbtn.innerText="断开设备";
+                    }
+                    else{
+                        sendbtn.innerText="连接设备";
+                    }
+                }
+                STLINKSWD.open();
+            }
+        };
+        COM=BLECOM;
+        SWD=UARTSWD=new UARTSWDDevice(COM);
+        if(detectDevice()){
+            SWD.packetsize=1;
+            startdownload.innerText='高速下载'
+        }
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        
+        let imgfile=async function(file) {
+            if (!file) return;
+            let extension = file.name.split('.').pop().toLowerCase();
+            let reader = new FileReader();
+            reader.onload = function(e) {
+                if (extension === 'hex') {
+                    download_info = {ROM:hex2bin(e.target.result)}
+                }
+                else if (extension === 'bin') {
+                    download_info = {ROM:Array.from(new Uint8Array(e.target.result))};
+                }
+                else if (extension === 'axf') {
+                    download_info = Elfparse(new Uint8Array(e.target.result));
+                }
+                else if (extension === 'flm') {
+                    let info = Elfparse(new Uint8Array(e.target.result));
+                    download_device[file.name]=(bin)=>downloadbin_device(bin,info);
+                    download_info=null;
+                    download_flm=info;
+                    newflm(file.name);
+                }
+                else if (extension === 'spi') {
+                    let info = Elfparse(new Uint8Array(e.target.result));
+                    download_device[file.name]=(bin)=>downloadspibin(bin,info);
+                    upload_device[file.name]=(addr,size)=>uploadspibin(addr,size,info);
+                    download_info=null;
+                    download_flm=info;
+                    newflm(file.name);
+                }
+                //console.log(download_info);
+                lastdownloadinfo=download_info;
+                
+                download_info && download_info.ROM && (download_info.ROM.length>0) && download_selectDevice && autodownload.checked && download_selectDevice(download_info.ROM);
+            };
+            if (extension === 'hex') {
+                reader.readAsText(file);
+            } else {
+                reader.readAsArrayBuffer(file);
+            }
+        }
+        
+        document.addEventListener('dragover', function(e) {
+            e.preventDefault();
+        });
+
+        document.addEventListener('paste', function(e) {
+            const items = e.clipboardData.items;
+            if (!items || items.length === 0) return;
+            const item = items[0];
+            if (item.kind === 'file') {
+                e.preventDefault();
+                const file = item.getAsFile();
+                imgfile(file);
+            }
+        });
+
+        document.addEventListener('drop', function(e) {
+            e.preventDefault();
+            const file = e.dataTransfer.files[0];
+            imgfile(file);
+        });
+
+        fileInput.onchange=e=>{
+            const file = e.target.files[0];
+            imgfile(file);
+        }
+    });
+</script>
+<script>
+    function floatball(path='interface.jpg'){
+        const css=`.floating-ball {
+            width: 40px;
+            height: 40px;
+            background-color: #fff1;
+            border-radius: 50%;
+            position: fixed;
+            top: 30px;
+            right: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.3s ease;
+            cursor: pointer;
+        }
+        .floating-ball:hover {
+            transform: scale(1.2);
+        }`;
+        let style = document.createElement('style');
+        style.type = 'text/css';
+        style.innerHTML=css;
+        document.getElementsByTagName('head')[0].appendChild(style);
+        let div=document.createElement('div');
+        div.classList.add('floating-ball');
+        div.innerHTML=`🔌`;
+        div.onclick=async ()=>{
+            await SWD.connect();
+            if(SWD.coreID==197203063){
+                div.style.backgroundColor='#0f07';
+                setTimeout(() => {
+                    div.style.backgroundColor='#fff1';
+                }, 1500);
+            }
+        }
+        document.body.append(div)
+    }
+    floatball();
+</script>
+<script>
+    function getBin(file) {
+        return new Promise((resolve, reject) => {
+            if (!file) reject();
+            let extension = file.name.split('.').pop().toLowerCase();
+            let reader = new FileReader();
+            reader.onload = function(e) {
+                let rom;
+                if (extension === 'hex') {
+                    rom = {ROM:hex2bin(e.target.result)}
+                }
+                else if (extension === 'bin') {
+                    rom = {ROM:Array.from(new Uint8Array(e.target.result))};
+                }
+                else if (extension === 'axf') {
+                    rom = Elfparse(new Uint8Array(e.target.result));
+                }
+                resolve(rom.ROM);
+            };
+            reader.onerror = reject;
+            if (extension === 'hex') {
+                reader.readAsText(file);
+            } else {
+                reader.readAsArrayBuffer(file);
+            }
+        });
+    }
+    async function buildROMjs(beforurl='data'){
+        let tasks=[];
+        let f = await showDirectoryStructure();
+        let roms=fitfile(f,'.axf');
+        let count=1;
+        let setinfo=[];
+        let dir=f['output'];
+        if(!f['output']){
+            dir=await createFolder(f['/'],'output');
+        }
+        for (let [k,v] of Object.entries(roms)) {
+            let name=`${count}.js`;
+            let kn=k.substring(0,k.indexOf('/')).replace('testPY32 ','');
+            setinfo.push(`romlist['${kn}']='${beforurl}/${name}';\r\n`);
+            let p=v.file.getFile()
+            .then(e=>getBin(e))
+            .then(e=>convertToBase64(e))
+            .then(e=>createfile(name,new TextEncoder().encode(`rommap['${kn}']='${e}';`),dir))
+            tasks.push(p);
+            count+=1;
+        }
+        await createfile('list.js',new TextEncoder().encode(setinfo.join('')),dir);
+        await Promise.all(tasks);
+    }
+</script>
+</html>
