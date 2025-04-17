@@ -4836,7 +4836,7 @@
         }
     }
     function mcuW32(addr,value){
-        if (!swdconnect) return;
+        if (!swdconnect) return '!';
         if (!mcuchainlast) {
             // 初始化队列
             mcuchain = mcuchainlast = Promise.resolve()
@@ -4848,6 +4848,7 @@
                 .then(()=>SWD.WriteData(addr,value))
                 .catch(console.error); // 链式捕获异常
         }
+        return `0x${Hex32(addr)}=${value}`;
     }
     DockBar=null;
     PanelInit=(()=>{
@@ -5218,7 +5219,7 @@
                     excelformula.push(`'${id}'`);
                     excelformula.push(`\`=${v.formula.replaceAll('`','\\`')}\``);
                 }
-                else if(v.value){
+                else if(v.value!==''){
                     exceldata.push(`'${id}'`);
                     exceldata.push(`\`${v.value.toString().replaceAll('`','\\`')}\``);
                 }
@@ -5331,12 +5332,20 @@
         let lastselectcell;
 
         let debugpanelmenu=new ContextMenu(excelpanel.panel,[
-            {text:'',label:'添加变量',action:(e,div,menu)=>{
+            {text:'',label:'添加变量R',action:(e,div,menu)=>{
                 if(!lastdownloadinfo)return;
                 if(!lastdownloadinfo.symbol)return;
                 let name=div.children[0].value;
                 if(!lastdownloadinfo.symbol[name])return;
-                excelTable.Data[excelTable.selectCellKey]=`=TIMER(1)(SWD.ReadData(${lastdownloadinfo.symbol[name].st_value}).then(e=>($.map.${name}=e)))|0+$.map.${name}`; ;
+                excelTable.Data[excelTable.selectCellKey]=`=TIMER(1)(mcuR32(${lastdownloadinfo.symbol[name].st_value},(e=>($.map.${name}=e)))|0+$.map.${name})`;
+            }},
+            {text:'',label:'添加变量W',action:(e,div,menu)=>{
+                if(!lastdownloadinfo)return;
+                if(!lastdownloadinfo.symbol)return;
+                let name=div.children[0].value;
+                if(!lastdownloadinfo.symbol[name])return;
+                const addr=lastdownloadinfo.symbol[name].st_value;
+                excelTable.Data[excelTable.selectCellKey]=`=mcuW32(${addr},0)`;
             }},
             {text:'',label:'添加变量地址',action:(e,div,menu)=>{
                 if(!lastdownloadinfo)return;
