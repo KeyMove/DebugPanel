@@ -2038,7 +2038,7 @@
             setTimeout(() => {
                 this.menuElement.style.transition='.3s';
                 this.menuElement.style.maxWidth = `1000px`;
-                this.menuElement.style.maxHeight = `${this.menuElement.children.length*2.22+1}em`;
+                this.menuElement.style.maxHeight = `${this.menuElement.children.length*2.26+1}em`;
                 this.menuElement.style.opacity='100%';
             }, 1);
             if(this.menuElement.children.length==0){
@@ -2502,8 +2502,8 @@
                 if(removebt){
                     removebt.onclick=(e)=>{
                         //calls(closecalls,e.target.parentNode);
-                        val.ondivclose(e);
-                        e.target.parentNode.remove();
+                        if(!val.ondivclose(e))
+                            e.target.parentNode.remove();
                     };
                 }
                 dragitem.style.setProperty('--sn', `"${name}"`);
@@ -2950,7 +2950,7 @@
             const ampoffsetpos=this.AmplitudeOffset%amplitudeStepHeight;
             for (let i = 0; i < amplitudeSteps+1; i++) {
                 ctx.beginPath();
-                const text=`${(amplitudeRange/amplitudeSteps*(amplitudeSteps-i+amppos)+this.Amplitude.min).toFixed(0)}`;
+                const text=`${(amplitudeRange/amplitudeSteps*(amplitudeSteps-i+amppos)+this.Amplitude.min).toFixed(1)}`;
                 if(h<0){
                     ctx.moveTo(this.width, i * amplitudeStepHeight+ampoffsetpos);
                     ctx.lineTo(this.width-10, i * amplitudeStepHeight+ampoffsetpos);
@@ -3102,10 +3102,10 @@
             ctx.lineWidth = 1;
             ctx.strokeRect(lx, ly, 100, 60);
             ctx.font = this.font;
-            ctx.strokeText(`索引:${(this.hoverindex+this.dataIndex)}`, lx+3, ly+15);
-            ctx.strokeText(`值:${(this.wave[this.hoverindex]).toFixed(2)}`, lx+3, ly+30);
+            ctx.strokeText(`T:${(this.hoverindex+this.dataIndex)}`, lx+3, ly+15);
+            ctx.strokeText(`${this.waveName[0] || '值'}:${(this.wave[this.hoverindex]).toFixed(2)}`, lx+3, ly+30);
             for (let i = 0; i < this.subwavedata.length; i++) {
-                ctx.strokeText(`值${i+2}:${(this.subwavedata[i][this.dataIndex+this.hoverindex]).toFixed(2)}`, lx+3, ly+45+i*15);
+                ctx.strokeText(`${this.waveName[i+1] || ('值'+(i+2))}:${(this.subwavedata[i][this.dataIndex+this.hoverindex]).toFixed(2)}`, lx+3, ly+45+i*15);
             }
             ctx.fill();
         }
@@ -3411,7 +3411,8 @@
         this.endCell = null;             // 选择结束单元格
         this.selectCell = null;          // 当前选中单元格
         this.selectCellKey = null;
-        
+        this.updatetype=0;
+        this.updatelevel=0;
         // 创建选择矩形元素
         this.selectionRect = document.createElement('div');
         this.selectionRect.className = 'selection-rect';
@@ -3419,9 +3420,12 @@
         // 空操作函数
         this.action_null = () => 0;
         
+        this.PromiseMode = false;
+        this.chain = null;
+        this.lastchain = null;
         // 单元格数据缓存和依赖跟踪
         this.cellData = {}; 
-        this.Data = {map:{}};
+        this.Data = {map:{},handle:this};
 
         // 配置系统函数
         this.systemIdentifier = {
@@ -3449,7 +3453,9 @@
                 this.TimerDT[i]--;
                 if(this.TimerDT[i]<=0){
                     this.TimerDT[i]=this.TimerMS[i];
-                    this.callupdateCell(this.cellData[`TIMER${this.TimerMS[i]}`]);
+                    const cell=this.cellData[`TIMER${this.TimerMS[i]}`];
+                    if(cell.updatecell.size>0)
+                        this.callupdateCell(cell);
                 }
             }
         }, 100);
@@ -3701,6 +3707,7 @@
                 Object.defineProperty(this.Data, cellKey, {
                     get: () => this.cellData[cellKey].value,
                     set: (v) => {
+                        this.updatetype=1;
                         v=v.toString();
                         if (v.startsWith('=')) {
                             // 处理公式
@@ -3730,7 +3737,7 @@
                 // 输入框失去焦点事件
                 input.addEventListener('blur', (e) => {
                     const inputValue = e.target.value.trim();
-                    
+                    this.updatetype=0;
                     if (inputValue.startsWith('=')) {
                         // 处理公式
                         const formula = inputValue.substring(1);
@@ -3754,11 +3761,60 @@
      * @param {Object} cell - 单元格数据对象
      */
     callupdateCell(cell) {
-        cell.updatecell.forEach(e => {
-            if (e.action != this.action_null)
-                e.input.value = e.value = e.action(this.Data);
-            this.callupdateCell(e);
-        });
+        // 用于跟踪已访问的单元格，避免重复处理
+        const visited = new Set();
+        // 用于存储拓扑排序结果
+        const sortedCells = [];
+        
+        // 递归进行深度优先搜索，构建拓扑排序
+        function visit(cell) {
+            if (visited.has(cell)) return;
+            visited.add(cell);
+            
+            // 先访问所有依赖项
+            cell.updatecell.forEach(e => visit(e));
+            
+            // 所有依赖项处理完后，将当前单元格加入排序列表
+            sortedCells.push(cell);
+        }
+        
+        // 从初始单元格开始构建拓扑排序
+        visit(cell);
+        if(!this.PromiseMode){
+            for (let i = sortedCells.length - 1; i >= 0; i--) {
+                const currentCell = sortedCells[i];
+                currentCell.updatecell.forEach(e => {
+                    if (e.action != this.action_null) {
+                        e.input.value = e.value = e.action(this.Data);
+                        this.updatetype |= 2;
+                    }
+                });
+            }
+        }
+        else{
+            let actions=[];
+            // 按照拓扑顺序更新单元格
+            for (let i = sortedCells.length - 1; i >= 0; i--) {
+                const currentCell = sortedCells[i];
+                currentCell.updatecell.forEach(e => {
+                    if (e.action != this.action_null) {
+                        //e.input.value = e.value = e.action(this.Data);
+                        actions.push(()=>(e.input.value = e.value = e.action(this.Data)));
+                        this.updatetype |= 2;
+                    }
+                });
+            }
+            if(!this.lastchain){
+                this.lastchain=this.chain=Promise.resolve();
+                for (let i = 0; i < actions.length; i++) 
+                    this.lastchain=this.lastchain.then(actions[i]);
+                this.chain.then(()=>{this.lastchain=this.chain=null;console.log('ok');});
+            }
+            else{
+                for (let i = 0; i < actions.length; i++) 
+                    this.lastchain=this.lastchain.then(actions[i]);
+            }
+        }
     }
 
     /**
@@ -4335,23 +4391,494 @@
 </style>
 
 <script>
-    
-    (()=>{
-        excelpanel=DragDiv.create(document.querySelector(".mainpanel"),'Data',800,600,true,true);
+        /**
+         * MacOS风格的距离感应Dock栏类
+         * @class
+         * @classdesc 创建一个具有距离感应放大效果的MacOS风格Dock栏
+         * 
+         * @param {HTMLElement|string} container - 容器元素或元素ID，Dock将渲染到此容器中
+         * @param {Array<Object>} [items=[]] - 初始Dock项目数组，每个项目应包含emoji和app属性
+         * @param {Object} [options={}] - 配置选项
+         * @param {string} [options.position='left'] - Dock位置 ('left' 或 'right')
+         * @param {number} [options.scaleFactor=0.6] - 鼠标悬停时的放大系数
+         * 
+         * @example
+         * // 基本用法
+         * const dock = new MacOSDock('myDock', [
+         *     { emoji: '😀', app: 'finder' },
+         *     { emoji: '😄', app: 'safari' }
+         * ]);
+         * 
+         * // 动态添加项目
+         * dock.addItem({ emoji: '🎉', app: 'party' });
+         */
+         class MacOSDock {
+            constructor(container, items = [], options = {}) {
+                /**
+                 * @member {HTMLElement} - Dock的主容器元素
+                 */
+                this.container = typeof container === 'string' ? document.getElementById(container) : container;
+                
+                /**
+                 * @member {Array<Object>} - Dock项目数组
+                 */
+                this.items = items;
+                
+                /**
+                 * @member {Object} - 配置选项
+                 * @property {string} position - Dock位置
+                 * @property {number} scaleFactor - 放大系数
+                 */
+                this.options = {
+                    position: 'left',
+                    scaleFactor: 0.6,
+                    ...options
+                };
+                
+                // 初始化Dock
+                this.init();
+                // 渲染Dock内容
+                this.render();
+                // 设置事件监听
+                this.setupEventListeners();
+            }
+            
+            /**
+             * 初始化Dock结构
+             * @private
+             */
+            init() {
+                // 如果样式不存在则创建样式
+                if (!document.getElementById('dock-styles')) {
+                    const style = document.createElement('style');
+                    style.id = 'dock-styles';
+                    style.textContent = this.getDockStyles();
+                    document.head.appendChild(style);
+                }
+                
+                // 创建Dock容器
+                this.dockContainer = document.createElement('div');
+                this.dockContainer.className = 'dock-container';
+                
+                // 创建Dock主体
+                this.dock = document.createElement('div');
+                this.dock.className = 'dock';
+                this.dock.id = 'dock';
+                
+                // 组装DOM结构
+                this.dockContainer.appendChild(this.dock);
+                this.container.appendChild(this.dockContainer);
+                
+                // 初始高度设置
+                this.updateDockHeight();
+            }
+            
+            /**
+             * 更新Dock高度（带动画）
+             * @private
+             */
+            updateDockHeight() {
+                // 计算Dock应有的高度（包括padding）
+                const itemHeight = 50; // 每个项目高度
+                const itemMargin = 10; // 每个项目的上下margin总和
+                const dockPadding = 20; // Dock的上下padding总和
+                const newHeight = this.items.length * (itemHeight + itemMargin) + dockPadding;
+                
+                // 应用高度变化（CSS transition会自动处理动画）
+                this.dock.style.height = `${newHeight}px`;
+            }
+            
+            /**
+             * 获取Dock基础样式
+             * @private
+             * @returns {string} CSS样式字符串
+             */
+            getDockStyles() {
+                return `
+                    .dock-container {
+                        position: fixed;
+                        left: 20px;
+                        top: 50%;
+                        transform: translateY(-50%);
+                        z-index: 1000;
+                    }
+
+                    .dock {
+                        user-select: none;
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        background: rgba(255, 255, 255, 0.4);
+                        backdrop-filter: blur(10px);
+                        border-radius: 18px;
+                        padding: 10px 5px;
+                        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+                        border: 1px solid rgba(255, 255, 255, 0.2);
+                        font-size: 2rem;
+                        transition: height 0.2s ease-out;
+                        will-change: height;
+                    }
+
+                    .dock-item {
+                        width: 50px;
+                        height: 50px;
+                        margin: 5px 0;
+                        position: relative;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        font-size: calc(2rem * var(--scale, 1));
+                        position: relative;
+                        left: calc((2rem * var(--scale, 1) - 2rem)/2);
+                        transition: all 0.15s ease-out;
+                        opacity: 1;
+                    }
+
+                    /* 添加项目时的动画 */
+                    .dock-item.adding {
+                        animation: fadeIn 0.5s ease-out forwards;
+                    }
+
+                    /* 移除项目时的动画 */
+                    .dock-item.removing {
+                        animation: fadeOut 0.1s ease-out forwards;
+                    }
+
+                    .dock-item::after {
+                        content: '';
+                        position: absolute;
+                        bottom: -5px;
+                        width: 5px;
+                        height: 5px;
+                        background-color: rgba(0, 0, 0, 0.4);
+                        border-radius: 50%;
+                        opacity: 0;
+                        transition: opacity 0.2s ease;
+                    }
+
+                    .dock-item.active::after {
+                        opacity: 1;
+                    }
+
+                    /* 应用名称提示框 */
+                    .dock-item-tooltip {
+                        position: absolute;
+                        left: 60px;
+                        background: rgba(0, 0, 0, 0.7);
+                        color: white;
+                        padding: 5px 10px;
+                        border-radius: 4px;
+                        font-size: 14px;
+                        white-space: nowrap;
+                        pointer-events: none;
+                        opacity: 0;
+                        transform: translateX(-10px);
+                        transition: all 0.3s ease;
+                        z-index: 1001;
+                    }
+
+                    .dock-item:hover .dock-item-tooltip {
+                        opacity: 1;
+                        transform: translateX(0);
+                    }
+
+                    /* 淡入动画 */
+                    @keyframes fadeIn {
+                        from {
+                            opacity: 0;
+                            transform: translateY(10px);
+                        }
+                        to {
+                            opacity: 1;
+                            transform: translateY(0);
+                        }
+                    }
+
+                    /* 淡出动画 */
+                    @keyframes fadeOut {
+                        from {
+                            opacity: 1;
+                            transform: translateY(0);
+                        }
+                        to {
+                            opacity: 0;
+                            transform: translateY(-10px);
+                        }
+                    }
+                `;
+            }
+            
+            /**
+             * 创建工具提示元素
+             * @private
+             * @param {string} appName - 应用名称
+             * @returns {HTMLElement} 工具提示元素
+             */
+            createTooltip(appName) {
+                const tooltip = document.createElement('div');
+                tooltip.className = 'dock-item-tooltip';
+                tooltip.textContent = appName;
+                return tooltip;
+            }
+            
+            /**
+             * 渲染Dock内容
+             * @private
+             */
+            render() {
+                if(this.items.length==0)this.dockContainer.style.display='none';
+                
+                // 清空现有内容
+                this.dock.innerHTML = '';
+                
+                // 遍历所有项目并创建对应的DOM元素
+                this.items.forEach((item, index) => {
+                    const dockItem = document.createElement('div');
+                    dockItem.className = 'dock-item';
+                    dockItem.dataset.app = item.app || `app-${index}`;
+                    dockItem.callback = (()=>item.callback(this,index)) || (()=>null);
+                    dockItem.dataset.index = index;
+                    dockItem.textContent = item.emoji || '📁';
+                    
+                    // 添加工具提示
+                    const tooltip = this.createTooltip(item.app || `App ${index + 1}`);
+                    dockItem.appendChild(tooltip);
+                    
+                    this.dock.appendChild(dockItem);
+                });
+                
+                // 更新Dock高度
+                this.updateDockHeight();
+
+                
+            }
+            
+            /**
+             * 设置事件监听器
+             * @private
+             */
+            setupEventListeners() {
+                // 点击事件 - 标记活动项目
+                this.dock.addEventListener('click', (e) => {
+                    const item = e.target.closest('.dock-item');
+                    if (item) {
+                        // 移除所有活动状态
+                        this.dock.querySelectorAll('.dock-item').forEach(i => i.classList.remove('active'));
+                        // 添加当前活动状态
+                        item.classList.add('active');
+                        //console.log(`打开 ${app} 应用`);
+                        item.callback();
+
+                    }
+                });
+                
+                // 鼠标移动事件 - 实现距离感应效果
+                this.dock.addEventListener('mousemove', (e) => {
+                    const item = e.target.closest('.dock-item');
+                    if (item) {
+                        // 计算鼠标相对于当前元素的位置
+                        const rect = item.getBoundingClientRect();
+                        const offset = Math.abs(e.clientY - rect.top) / rect.height;
+                        const prev = item.previousElementSibling;
+                        const next = item.nextElementSibling;
+                        
+                        // 重置所有缩放
+                        this.resetScale();
+                        
+                        // 根据距离设置相邻元素的缩放
+                        if (prev) prev.style.setProperty('--scale', 1 + this.options.scaleFactor * Math.abs(offset - 1));
+                        item.style.setProperty('--scale', 1 + this.options.scaleFactor);
+                        if (next) next.style.setProperty('--scale', 1 + this.options.scaleFactor * offset);
+                    }
+                });
+                
+                // 鼠标离开事件 - 重置所有缩放
+                this.dock.addEventListener('mouseleave', () => {
+                    this.resetScale();
+                });
+            }
+            
+            /**
+             * 重置所有Dock项目的缩放比例
+             * @public
+             */
+            resetScale() {
+                this.dock.querySelectorAll('.dock-item').forEach(item => {
+                    item.style.setProperty('--scale', 1);
+                });
+            }
+            
+            /**
+             * 添加一个新项目到Dock（带淡入动画和高度动画）
+             * @public
+             * @param {Object} item - 要添加的项目
+             * @param {string} item.emoji - 项目显示的emoji图标
+             * @param {string} item.app - 项目关联的应用标识
+             * @returns {Promise} 动画完成后resolve的Promise
+             */
+            addItem(item) {
+                if(this.items.length==0)this.dockContainer.style.display='block';
+                return new Promise((resolve) => {
+                    // 先更新数据
+                    this.items.push(item);
+                    
+                    let index=this.items.length-1;
+                    // 创建新项目元素
+                    const dockItem = document.createElement('div');
+                    dockItem.className = 'dock-item adding';
+                    dockItem.dataset.app = item.app || `app-${index}`;
+                    dockItem.callback = (()=>item.callback(this,index)) || (()=>null);
+                    dockItem.dataset.index = index;
+                    dockItem.textContent = item.emoji || '📁';
+                    
+                    // 添加工具提示
+                    const tooltip = this.createTooltip(item.app || `App ${this.items.length}`);
+                    dockItem.appendChild(tooltip);
+                    
+                    // 添加到DOM
+                    this.dock.appendChild(dockItem);
+                    
+                    // 同步更新高度（CSS transition会自动处理动画）
+                    this.updateDockHeight();
+                    
+                    // 动画结束后移除临时类
+                    dockItem.addEventListener('animationend', () => {
+                        dockItem.classList.remove('adding');
+                        resolve();
+                    }, { once: true });
+                });
+            }
+            
+            /**
+             * 移除指定索引的项目（带淡出动画和高度动画）
+             * @public
+             * @param {number} index - 要移除的项目索引
+             * @returns {Promise<boolean>} Promise，动画完成后resolve是否移除成功
+             */
+            removeItem(index) {
+                return new Promise((resolve) => {
+                    if (index >= 0 && index < this.items.length) {
+                        const dockItems = this.dock.querySelectorAll('.dock-item');
+                        if (index < dockItems.length) {
+                            const itemToRemove = dockItems[index];
+                            
+                            // 添加移除动画类
+                            itemToRemove.classList.add('removing');
+                            
+                            // 同步更新高度（CSS transition会自动处理动画）
+                            this.updateDockHeight();
+                            
+                            // 动画结束后移除元素
+                            itemToRemove.addEventListener('animationend', () => {
+                                this.items.splice(index, 1);
+                                this.render(); // 重新渲染确保状态一致
+                                resolve(true);
+                            }, { once: true });
+                        } else {
+                            this.items.splice(index, 1);
+                            this.render();
+                            resolve(true);
+                        }
+                    } else {
+                        resolve(false);
+                    }
+                });
+            }
+            
+            /**
+             * 移除最后一个项目（带淡出动画和高度动画）
+             * @public
+             * @returns {Promise<boolean>} Promise，动画完成后resolve是否移除成功
+             */
+            removeLastItem() {
+                return this.removeItem(this.items.length - 1);
+            }
+            
+            /**
+             * 更新所有Dock项目
+             * @public
+             * @param {Array<Object>} newItems - 新的项目数组
+             */
+            updateItems(newItems) {
+                this.items = newItems;
+                this.render();
+            }
+            
+            /**
+             * 销毁Dock实例，清理DOM
+             * @public
+             */
+            destroy() {
+                this.dockContainer.remove();
+            }
+        }
+
+</script>
+
+<script>
+    var mcuchain=null;
+    var mcuchainlast=null;
+    var swdconnect=false;
+    function mcuR32(addr, call) {
+        if (!swdconnect) return;
+        if (!mcuchainlast) {
+            // 初始化队列
+            mcuchain = mcuchainlast = Promise.resolve()
+                .then(() => SWD.ReadData(addr))
+                .then(call)
+                .catch(console.error) // 捕获异常
+                .finally(() => { mcuchain = mcuchainlast = null; }); // 确保清理
+        } else {
+            mcuchainlast = mcuchainlast
+                .then(() => SWD.ReadData(addr))
+                .then(call)
+                .catch(console.error); // 链式捕获异常
+        }
+    }
+    function mcuW32(addr,value){
+        if (!swdconnect) return;
+        if (!mcuchainlast) {
+            // 初始化队列
+            mcuchain = mcuchainlast = Promise.resolve()
+                .then(()=>SWD.WriteData(addr,value))
+                .catch(console.error) // 捕获异常
+                .finally(() => { mcuchain = mcuchainlast = null; }); // 确保清理
+        } else {
+            mcuchainlast = mcuchainlast
+                .then(()=>SWD.WriteData(addr,value))
+                .catch(console.error); // 链式捕获异常
+        }
+    }
+    DockBar=null;
+    PanelInit=(()=>{
+
+        let baritems=[];
+
+        excelpanel=DragDiv.create(document.querySelector(".mainpanel"),'数据面板',800,600,true,true);
         excelTable = new ExcelTable(excelpanel.panel, 20, 26); 
         excelpanel.panel.style.backgroundColor='#fff';
         excelpanel.hide();
+        excelpanel.ondivclose=()=>{excelpanel.hide();DockBar.addItem({ emoji: '📝', app: '数据面板' ,callback:($,i)=>{$.removeItem(i);excelpanel.show();}});return true};
         
-        debugpanel=DragDiv.create(document.querySelector(".mainpanel"),'debug',800,600,true,true);
+        debugpanel=DragDiv.create(document.querySelector(".mainpanel"),'调试面板',800,600,true,true);
         debugpanel.hide();
+        debugpanel.ondivclose=()=>{debugpanel.hide();DockBar.addItem({ emoji: '💻', app: '调试面板' ,callback:($,i)=>{$.removeItem(i);debugpanel.show();}});return true};
         debugpanel.panel.innerHTML=`<div style="width: 100%;height: 100%;background-color: #3be;"><div style="width: 100%;height: 100%;"></div></div>`;
         debugentity=[];
+        
+        DockBar=new MacOSDock(document.querySelector(".mainpanel"),[
+            { emoji: '💻', app: '调试面板' ,callback:($,i)=>{$.removeItem(i);debugpanel.show();}},
+            { emoji: '📝', app: '数据面板' ,callback:($,i)=>{$.removeItem(i);excelpanel.show();}},
+        ]);
 
         let h1=debugpanel.panel.children[0];//顶层拖动遮罩
         let h2=h1.children[0];//底层实例
         h2.classList.add('pospanel');
         let h3=DragDiv.MultiSelect(h2);
         设备=new Databind();
+
+        let cellproxy={};
+
         let newentity=(div)=>{
             let item=DragDiv.create(div,'',100,20,false,true,true);
             item.titlediv.style.display='none';
@@ -4609,6 +5136,7 @@
             item.clone=paneldivcreate[name];
             item.clone(x,y,item);
             debugentity.push(item);
+            return item;
         };
         let clonetypediv=(x)=>{
             let item=x.clone(x.left,x.top);
@@ -4623,9 +5151,12 @@
         let unbindkey=(item)=>{
             if(item.bindcell){
                 let cell=item.bindcell;
-                cell.reqcell.forEach(e => e.updatecell.delete(cell));
-                cell.reqcell.clear();
-                设备.offIdUpdate(cell.id,cell.bindcall);
+                if(设备.mapchange[cell.id].length==1){
+                    cell.reqcell.forEach(e => e.updatecell.delete(cell));
+                    cell.reqcell.clear();
+                    设备.offIdUpdate(cell.id,cell.bindcall);
+                    cellproxy[cell.id]=null;
+                }
                 item.bindcell=null;
             }
         };
@@ -4635,24 +5166,27 @@
             let cell=item.bindcell;
             unbindkey(item);
             if(/^[A-Z]\d+$/.test(id)){
-                const e=excelTable.cellData[id];
-                if(e){
-                    cell=cell?cell:{
-                        value: '',          // 单元格值
-                        formula: '',       // 公式
-                        updateaction: this.action_null, // 更新函数
-                        updatecell: new Set(), // 依赖此单元格的单元格
-                        reqcell: new Set(),    // 此单元格依赖的单元格
-                        input: {value:0},          // 输入框引用
-                        handle:excelTable,
-                    };
-                    cell.reqcell.add(e);
-                    e.updatecell.add(cell);
-                    cell.id=id;
-                    cell.action=($)=>(设备.setValue(id,$[id]));
-                    cell.bindcall=(v)=>{e.value=e.input.value=v;e.handle.callupdateCell(e);};
-                    设备.onIdUpdate(id,cell.bindcall);
-                    item.bindcell=cell;
+                if(!cellproxy[id]){
+                    const e=excelTable.cellData[id];
+                    if(e){
+                        cell={
+                            value: '',          // 单元格值
+                            formula: '',       // 公式
+                            updateaction: this.action_null, // 更新函数
+                            updatecell: new Set(), // 依赖此单元格的单元格
+                            reqcell: new Set(),    // 此单元格依赖的单元格
+                            input: {value:0},          // 输入框引用
+                            handle:excelTable,
+                        };
+                        cell.reqcell.add(e);
+                        e.updatecell.add(cell);
+                        cell.id=id;
+                        cell.action=($)=>(($.handle.updatetype!=4) && 设备.setValue(id,$[id]));
+                        cell.bindcall=(v)=>{e.value=e.input.value=v;e.handle.updatetype=4;e.handle.callupdateCell(e);};
+                        设备.onIdUpdate(id,cell.bindcall);
+                        item.bindcell=cell;
+                        cellproxy[id]=cell;
+                    }
                 }
             }
             //---------------------------------
@@ -4662,19 +5196,67 @@
             item.rawsetvalue=value;
             item.setvalue && item.setvalue(value);
         };
+        let e64=(v)=>btoa(unescape(encodeURIComponent(v)));
+        let d64=(v)=>decodeURIComponent(escape(atob(v)));
         let builddata=()=>{
             let paneldata=[];
             for (let i = 0; i < debugentity.length; i++) {
                 const e = debugentity[i];
-                paneldata.push(e.divname);
+                paneldata.push(`'${e.divname}'`);
                 paneldata.push(e.style.left.replace('px',''));
                 paneldata.push(e.style.top.replace('px',''));
                 paneldata.push(e.style.width.replace('px',''));
                 paneldata.push(e.style.height.replace('px',''));
-                paneldata.push(e.rawsetid);
-                paneldata.push(e.rawsetvalue);
+                paneldata.push(e.rawsetid?`'${e.rawsetid}'`:'null');
+                paneldata.push(e.rawsetvalue?`'${e.rawsetvalue}'`:'null');
             }
-            return paneldata;
+            let exceldata=[];
+            let excelformula=[];
+            for (const [id,v] of Object.entries(excelTable.cellData)) {
+                
+                if(v.formula){
+                    excelformula.push(`'${id}'`);
+                    excelformula.push(`\`=${v.formula.replaceAll('`','\\`')}\``);
+                }
+                else if(v.value){
+                    exceldata.push(`'${id}'`);
+                    exceldata.push(`\`${v.value.toString().replaceAll('`','\\`')}\``);
+                }
+            }
+            //return btoa(JSON.stringify(`[${paneldata.join(',')}]`));
+            return `[[${debugpanel.style.width.replace('px','')},${debugpanel.style.height.replace('px','')}],[${paneldata.join(',')}],[${exceldata.join(',')},${excelformula.join(',')}]]`;//JSON.stringify();
+        };
+        let loaddata=(data)=>{
+            debugentity.forEach(x=>{
+                debugentity = debugentity.filter(item => item != x);
+                unbindkey(x);
+                x.close();
+            });
+            let tabdata=eval(data);
+            const r=debugpanel.parentElement.getBoundingClientRect();
+            excelpanel.style.left   =debugpanel.style.left   =`${(r.width-tabdata[0][0])/2}px`;
+            excelpanel.style.top    =debugpanel.style.top    =`${(r.height-tabdata[0][1])/2}px`;
+            excelpanel.style.width  =debugpanel.style.width  =tabdata[0][0]+'px'
+            excelpanel.style.height =debugpanel.style.height =tabdata[0][1]+'px'
+            let tab=tabdata[1];
+            for (let i = 0; i < tab.length/7; i++) {
+                const index=7*i;
+                let item=newtypediv(tab[index+1],tab[index+2],tab[index]);
+                item.style.width=`${tab[index+3]}px`;
+                item.style.height=`${tab[index+4]}px`;
+                item.ondivresize();
+                tab[index+5]!=null && bindkey(item,tab[index+5]);
+                tab[index+6]!=null && typedivsetvalue(item,tab[index+6]);
+            }
+            tab=tabdata[2];
+            for (let i = 0; i < tab.length/2; i++) {
+                const index=2*i;
+                excelTable.Data[tab[index]]=tab[index+1];
+            }
+            Array.from(h1.children).forEach(e=>{
+                e.hide && e.hide();
+            });
+            h3.enable=false;
         };
         let panelmenu=new ContextMenu(debugpanel,[
             {label:'button'  ,action:(e,div,menu)=>newtypediv(menu.x,menu.y,div.innerText)},
@@ -4733,7 +5315,13 @@
                 if(!v.length)return;
                 typedivsetvalue(v[0],div.children[0].value);
             }},
-            {label:'导出'  ,action:(e,div,menu)=>console.log(builddata())},
+            {label:'导出'  ,action:(e,div,menu)=>{
+                const data=builddata();
+                navigator.clipboard.writeText(data);
+                console.log(data);
+                
+            }},
+            {text:'',label:'导入'  ,action:(e,div,menu)=>loaddata(d64(div.children[0].value?div.children[0].value:(new URLSearchParams(window.location.search)).get('n')))},
         ]);
         
         panelmenu.ondrop=()=>{
@@ -4763,9 +5351,11 @@
             console.log(lastselectcell);
             
         };
-        const saveinfo=new URLSearchParams(window.location.search);
-
-    })();
+        const saveinfo=(new URLSearchParams(window.location.search.replace(/\+/g, '%2B').replace(/&/g, '%26')).get('n'));
+        setTimeout(() => {
+            if(saveinfo)loaddata(saveinfo);
+        }, 50);
+    });
 </script>
 
 
@@ -4926,24 +5516,29 @@
             uploadspi=uploadspi&&uploadspi||(()=>{});
         });
 
-
         let sendbtn=document.getElementById('com_open_btn');
         BLECOM=new BLEUART((h,b)=>{
             if(b){
                 SWD=UARTSWD;
                 sendbtn.innerText="断开设备";
+                swdconnect=true;
             }
-            else
+            else{
+                swdconnect=false;
                 sendbtn.innerText="连接设备";
+            }
         });
         USBCOM=new COMHelper((h,b)=>{
             if(b){
                 SWD=UARTSWD;
                 SWD.packetsize=0;
                 sendbtn.innerText="断开设备";
+                swdconnect=true;
             }
-            else
+            else{
+                swdconnect=false;
                 sendbtn.innerText="连接设备";
+            }
         });
         //STLINKSWD=new STLINK();
         otherCOM={
@@ -4952,8 +5547,10 @@
                     if(b){
                         SWD=STLINKSWD;
                         sendbtn.innerText="断开设备";
+                        swdconnect=true;
                     }
                     else{
+                        swdconnect=false;
                         sendbtn.innerText="连接设备";
                     }
                 }
@@ -5036,6 +5633,8 @@
             const file = e.target.files[0];
             imgfile(file);
         }
+
+        PanelInit();
     });
 </script>
 <script>
