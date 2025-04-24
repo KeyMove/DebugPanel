@@ -1002,7 +1002,7 @@
             return this.rst()
             .then(e=>{
                 this.coreID=e;
-                this.rate = ([this.lastData[190],this.lastData[189]].sort()[0]);
+                this.rate = ([this.lastData[190],this.lastData[189]].sort()[1])|0xf0;
                 console.log(`CoreID: ${Hex32(e)} Rate: ${this.rate}`);
                 
                 return this.wBus(0x81,0x1e)})
