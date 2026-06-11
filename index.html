@@ -957,7 +957,7 @@
             this.data.length=0;
             this.data.push(...this.bwInt(0x8b,addr));
             this.data.push(...this.bwInt(0xbb,data));
-            this.data.push(...this.brInt(0xbd));
+            this.data.push(...this.brInt(0x8d));
             return this.COM.sendBytes(this.data)
             .then(e=>this.COM.waitBytes((b)=>null));
         }
@@ -965,8 +965,10 @@
         ReadData(addr){
             this.data.length=0;
             this.data.push(...this.bwInt(0x8b,addr));
+            this.data.push(...this.brInt(0x8d));
             this.data.push(...this.brInt(0x9f));
-            this.data.push(...this.brInt(0xbd));
+            this.data.push(...this.brInt(0x8d));
+            this.data.push(...this.brInt(0x9f));
             return this.COM.sendBytes(this.data)
             .then(e=>this.COM.waitBytes((b)=>(this.lastInt=this.readInt(this.lastData=b))));
         }
@@ -1003,6 +1005,7 @@
             .then(e=>{
                 this.coreID=e;
                 this.rate = ([this.lastData[190],this.lastData[189]].sort()[1])|0xf0;
+                //this.rate = this.rate > 192? 192 : this.rate;
                 console.log(`CoreID: ${Hex32(e)} Rate: ${this.rate}`);
                 
                 return this.wBus(0x81,0x1e)})
@@ -1014,7 +1017,7 @@
             .then(e=>this.wBus(0xb1,0))
             .then(e=>this.wBus(0xa3,0x23000012))
             .then(e=>this.rBus(0x8D))
-            .then(e=>this.Go())
+            .then(e=>this.Halt())
         }
 
         softReset(){
@@ -1059,7 +1062,7 @@
                 }
             })
             .then(e=>this.COM.waitBytes(()=>{},len*46))
-            .then(e=>this.rBus(0xBD))
+            .then(e=>this.rBus(0x8D))
             .then(e=>{COM.buffer.length=0;});
         }
 
@@ -1067,7 +1070,8 @@
             this.COM.buffer.length=0;
             let len=(length+3)>>>2;
             return this.wBus(0x8B,addr)
-            .then(e=>this.rBus(0x9F))
+            .then(e=>this.rBus(0x8d))
+            .then(e=>this.rBus(0x9f))
             .then(e=>{
                 this.COM.buffer.length=0;
                 let bytes=this.brInt(0x9F);
@@ -1172,6 +1176,7 @@
             this.VCC=0;
             this.CoreID=0;
             this.REG=[];
+            this.Version=null;
             this.SPEED={
                 SWC_4MHZ : 0,
                 SWC_1P8MHZ_DIVISOR : 1,
@@ -1235,7 +1240,8 @@
 
         async getMode(){
             let r=await this.CMD(2,[0xf5]);
-            return r.getUint8();
+            this.mode=r.getUint8();
+            return this.mode;
         }
 
         async exitDFU(){
@@ -1263,8 +1269,6 @@
             let r=await this.CMD(8,[0xf7])
             return (2400*r.getUint32(4,true)/r.getUint32(0,true))|0;
         }
-
-        
 
         async Reset(){
             await this.CMD(2,[0xf2,0x32])
@@ -1305,16 +1309,21 @@
         async writeMem32(addr,data){
             //let len=(((data.length+3)/4)|0)<<2;
             //while(data.length<len)data.push(0xff);
+            await this.WriteData(addr,0);
             await this.CMD(0,new DataHelper([0xf2,0x08]).w32(addr).w16(data.length).bytes());
             let r=await this.stlink.transferOut(0x02,new Uint8Array(data));
-            await this.ReadStats();
+            await this.delayms(10);
+            //await this.ReadStats();
             return r!=null;
         }
 
         async readMem32(addr,len){
+            await this.ReadData(addr);
             await this.CMD(0,new DataHelper([0xf2,0x07]).w32(addr).w16(len).bytes());
+            await this.delayms(20);
             let r=await this.stlink.transferIn(1,len);
             //await this.ReadStats();
+            //r=await this.stlink.transferIn(1,len);
             return new Uint32Array(r.data.buffer);
         }
 
@@ -1335,6 +1344,7 @@
 
         async WriteReg(index,data){
             let r=await this.CMD(2,new DataHelper([0xf2,0x34,index&0x1f]).w32(data).bytes());
+            await this.ReadStats();
             return r!=null;
         }
 
@@ -1352,17 +1362,23 @@
             return true;
         }
 
+        async getVersion(){
+            this.Version = await this.CMD(6,[0xf1,0x80]);
+            return this.Version;
+        }
         async connect(){
             //await this.Init();
             //await this.getMode();
             //await new Promise(resolve => setTimeout(resolve, 2));
-            await this.Reset();
             //await this.Reset();
-            await this.getMode();
-            await this.exitDFU();
-            await this.getMode();
-            await this.SWDMode();
-            await this.getMode();
+            //await this.Reset();
+            await this.getVersion();
+            if(2!=await this.getMode()){
+                await this.exitDFU();
+                if(2!=await this.getMode())
+                    await this.SWDMode();
+                await this.getMode();
+            }
             await this.SWDSpeed(this.SPEED.SWC_4MHZ);
             this.VCC=await this.getVoltage();
             console.log(`${(this.VCC/1000).toFixed(2)}V`);
@@ -1370,12 +1386,12 @@
             console.log(`0x${toHex32(this.CoreID)}`);
             //let h=await this.ReadData(0xE000EDF0);
             //console.log(`0x${toHex32(h)}`);
-            let regs=await this.ReadRegs();
-            if((regs[0]&0xff)==0x80){
-                for (let i = 0; i < regs.length-1; i++) {
-                    this.REG[i]=regs[i+1];
-                }
-            }
+            //let regs=await this.ReadRegs();
+            //if((regs[0]&0xff)==0x80){
+            //    for (let i = 0; i < regs.length-1; i++) {
+            //        this.REG[i]=regs[i+1];
+            //    }
+            //}
             
             return this.CoreID;
         }
@@ -1783,7 +1799,8 @@
         if(!device)return;
         await SWD.connect()
         .then(e=>SWD.connect())
-        .then(e=>SWD.softReset());
+        .then(e=>SWD.softReset())
+        .then(e=>SWD.Halt());
         let index=0;
         let count=device.ROM.length;
         do{
@@ -1794,11 +1811,14 @@
             index+=ct;
         }while(count);
         
+        
         index=0;
         count=bin.length;
         console.log(`count:${count}`);
         let exec=async (func,r0=0,r1=0,r2=0,r3=0,databuff=device.RSB,sp=device.BUFF-4,bkpt=device.BKPT)=>{
             await SWD.WriteReg(0,r0)
+            //.then(e=>SWD.ReadReg(0,r0))
+            //.then(e=>SWD.WriteReg(0,r0))
             .then(e=>SWD.WriteReg(1,r1))
             .then(e=>SWD.WriteReg(2,r2))
             .then(e=>SWD.WriteReg(3,r3))
@@ -1808,13 +1828,16 @@
             .then(e=>SWD.WriteReg(15,func))
             .then(e=>SWD.WriteReg(16,0x01000000))
             .then(e=>SWD.Go());
-            for (let i = 0; i < 160; i++)if(await SWD.isHalt())return true;
+            for (let i = 0; i < 1600000; i++)if(await SWD.ReadReg(15)==0x20000000){console.log(i);return true};
             return false;
         }
 
-        if(!await exec(device.Init))return;
-        if(!await exec(device.EraseChip))return;
-        let pagesize=1024;
+        if(!await exec(device.Init))return;console.log('Init');
+        if(!await exec(device.EraseChip))return;console.log('EraseChip');
+        //if(!await exec(device.Init))return;console.log('Init');
+        //await SWD.delayms(100);
+        console.log(viewhex(u32t8(await SWD.readMem32(0x20000000,1024))));
+        let pagesize=device.szPage;
         let binsize=count;
         while(count){
             
@@ -1823,9 +1846,8 @@
             bin = bin.slice(chunkSize);
             count -= chunkSize;
             console.log(`count:${count} chunk:${chunk.length} index:${index} rate:${index/binsize}`);
-            let wr=await SWD.writeMem32(device.BUFF,chunk)
-            .then(e=>exec(device.ProgramPage,index+device.DevAdr,chunkSize,device.BUFF));
-            if(!wr)return;
+            await SWD.writeMem32(device.BUFF,chunk);
+            if(!await exec(device.ProgramPage,index+device.DevAdr,chunkSize,device.BUFF))return;
             index+=chunkSize;
             setUploadRate(index/binsize);
         }
@@ -3425,7 +3447,7 @@
         this.lastchain = null;
         // 单元格数据缓存和依赖跟踪
         this.cellData = {}; 
-        this.Data = {map:{},handle:this};
+        this.Data = {map:{},handle:this,update:(cell)=>this.callupdateCell(this.cellData[cell])};
 
         // 配置系统函数
         this.systemIdentifier = {
@@ -3892,7 +3914,7 @@
             this.callupdateCell(cell);
         } catch (error) {
             // 公式错误处理
-            cell.input.value = cell.value = '#ERROR!';
+            //cell.input.value = cell.value = '#ERROR!';
             console.error('Formula error:', error);
         }
     }
@@ -5514,11 +5536,11 @@
         switch(name){
             case 'UART':
                 COM=USBCOM;
-                SWD.COM=COM;
+                UARTSWD.COM=COM;
                 break;
             case 'BLE':
                 COM=BLECOM;
-                SWD.COM=COM;
+                UARTSWD.COM=COM;
                 break;
             case 'STLINK':
                 COM=otherCOM;
@@ -5685,7 +5707,7 @@
             }
         };
         COM=BLECOM;
-        SWD=UARTSWD=new UARTSWDDevice(COM);
+        UARTSWD=new UARTSWDDevice(COM);
         if(detectDevice()){
             SWD.packetsize=1;
             startdownload.innerText='高速下载'
