@@ -125,7 +125,7 @@
             <button class="bt btl" id="startdownload" onclick="downloadselect()" >
                 <input type="checkbox" id="autodownload">
                 下载</button>
-            <button class="bt btr" onclick="debugpanel.show();excelpanel.show();">打开调试面板</button>
+            <button class="bt btr" onclick="debugpanel.show();excelpanel.show();DockBar.removeItem(0);DockBar.removeItem(0);">打开调试面板</button>
         </div>
     </div>
 </div>
@@ -5814,7 +5814,7 @@
         div.innerHTML=`🔌`;
         div.onclick=async ()=>{
             await SWD.connect();
-            if(SWD.coreID==197203063){
+            if((SWD.coreID&0xffff) == 0x1477){
                 div.style.backgroundColor='#0f07';
                 setTimeout(() => {
                     div.style.backgroundColor='#fff1';
