@@ -1017,7 +1017,7 @@
             .then(e=>this.wBus(0xb1,0))
             .then(e=>this.wBus(0xa3,0x23000012))
             .then(e=>this.rBus(0x8D))
-            .then(e=>this.Halt())
+            .then(e=>this.Go())
         }
 
         softReset(){
