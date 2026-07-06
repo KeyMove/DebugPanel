@@ -1619,7 +1619,7 @@
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    async function downloadspibin(bin,downloadinfo) {
+    async function downloadspibin(bin,downloadinfo,skiperase=false) {
         if(!bin)return;
         const ADDR_STAS= downloadinfo.symbol.stats.st_value;
         const ADDR_XOR = downloadinfo.symbol.xorvalue.st_value;
@@ -1634,6 +1634,7 @@
         console.log(`ADDR: 0x${Hex32(ADDR_ADDR)}`);
         console.log(`DATA: 0x${Hex32(ADDR_DATA)}`);
 
+        
         await SWD.connect()
         .then(e=>SWD.connect())
         .then(e=>SWD.softReset())
@@ -1644,13 +1645,13 @@
         .then(e=>SWD.ReadReg(15)).then(e=>console.log(Hex32(e)))
         .then(e=>SWD.Go())
         .then(e=>SWD.WriteData(ADDR_ADDR,0xffffffff))
-        .then(e=>SWD.WriteData(ADDR_STAS,3))
+        .then(e=>SWD.WriteData(ADDR_STAS,skiperase?0:3))
         .then(e=>delay(10))
         .then(e=>SWD.Halt())
         .then(e=>SWD.ReadReg(15)).then(e=>console.log(Hex32(e)))
         .then(e=>SWD.Go())
         
-        for (let i = 0; i < 100; i++) {
+        for (let i = 0; i < 1000000; i++) {
             let sta=await SWD.ReadData(ADDR_STAS);
             console.log(`i:${i} sta:${sta}`);
             if(sta&0x80)break;
