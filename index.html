@@ -1651,6 +1651,7 @@
         .then(e=>SWD.ReadReg(15)).then(e=>console.log(Hex32(e)))
         .then(e=>SWD.Go())
         
+        if(!skiperase)
         for (let i = 0; i < 1000000; i++) {
             let sta=await SWD.ReadData(ADDR_STAS);
             console.log(`i:${i} sta:${sta}`);
@@ -1695,7 +1696,7 @@
                 let sta=await SWD.ReadData(ADDR_STAS);
                 //console.log(`i:${i} sta:${sta}`);
                 if(sta&0x80)break;
-                if(i==127){
+                if(i==126){
                     clearInterval(timer);
                     return;
                 }
