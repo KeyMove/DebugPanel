@@ -4992,6 +4992,29 @@
                 .catch(console.error); // 链式捕获异常
         }
     }
+    var runram = async (ROM) => {
+        const data = lastdownloadinfo.ROM;  // 假设为 Uint8Array 或 ArrayBuffer
+        const chunkSize = 1024;             // 每次写入 1KB
+        const baseAddr = 0x20000000;
+
+        // 分块写入
+        for (let offset = 0; offset < data.length; offset += chunkSize) {
+            const chunk = data.slice(offset, offset + chunkSize);
+            await SWD.writeMem32(baseAddr + offset, chunk);
+            // 可以加个小延时避免 SWD 过载（视情况）
+            // await delay(1);
+        }
+
+        // 设置 SP 和 PC（原逻辑保持不变）
+        const v = new DataHelper(lastdownloadinfo.ROM);
+        await SWD.WriteReg(13, v.r32());  // SP
+        const sp = await SWD.ReadReg(13);
+        console.log(`SP: ${Hex32(sp)}`);
+
+        await SWD.WriteReg(15, v.r32() | 1); // PC，设置 Thumb 位
+        const pc = await SWD.ReadReg(15);
+        console.log(`PC: ${Hex32(pc)}`);
+    };
     DockBar=null;
     PanelInit=(()=>{
 
