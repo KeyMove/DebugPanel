@@ -369,7 +369,7 @@
                 szDev: elfHeaderView.getUint32(constDataSection + 8+128, true),
                 szPage: elfHeaderView.getUint32(constDataSection + 12+128, true),
                 Res: elfHeaderView.getUint32(constDataSection + 16+128, true),
-                valEmpty: elfHeaderView.getUint32(constDataSection + 20+128, true),
+                valEmpty: elfHeaderView.getUint8(constDataSection + 20+128, true),
                 toProg: elfHeaderView.getUint32(constDataSection + 24+128, true),
                 toErase: elfHeaderView.getUint32(constDataSection + 28+128, true),
                 sectors: []
@@ -405,7 +405,7 @@
             flashDevice['RAM']=entry;
             flashDevice['BUFF']=(entry+rom[0].length+1023)&~1023;
             flashDevice['BKPT']=entry+1;
-            flashDevice['RSB']=entry+rom[0].length;
+            flashDevice['RSB']=entry+HEADER_SIZE+elfSectionMap["PrgData"].sh_addr;
             flashDevice['RSP']=entry+rom[0].length+flashDevice.szPage+Stack_Size;
             //console.log(flashDevice);
             return flashDevice;
@@ -1802,7 +1802,9 @@
         await SWD.connect()
         .then(e=>SWD.connect())
         .then(e=>SWD.softReset())
-        .then(e=>SWD.Halt());
+        .then(e=>SWD.Halt())
+        .then(e=>SWD.isHalt())
+        .then(e=>console.log(`halt:${e}`));
         let index=0;
         let count=device.ROM.length;
         do{
@@ -1830,15 +1832,22 @@
             .then(e=>SWD.WriteReg(15,func))
             .then(e=>SWD.WriteReg(16,0x01000000))
             .then(e=>SWD.Go());
-            for (let i = 0; i < 1600000; i++)if(await SWD.ReadReg(15)==0x20000000){console.log(i);return true};
+            for (let i = 0; i < 6400000; i++)if(await SWD.isHalt()){console.log(i);return true};
+            console.log('time out');
             return false;
         }
-
-        if(!await exec(device.Init))return;console.log('Init');
+        //int Init(unsigned long adr, unsigned long clk, unsigned long fnc);
+        if(!await exec(device.Init,device.DevAdr,0,1))return;console.log('Init');
+        //await SWD.ReadData(0x40022014).then(e=>console.log(Hex32(e)))
         if(!await exec(device.EraseChip))return;console.log('EraseChip');
+        await SWD.ReadData(device.RAM).then(e=>{
+            console.log(Hex32(e));
+            if(e==(0xffffffff|0))
+                return SWD.connect().then(e=>SWD.Halt()).then(e=>console.log('reconnect'));
+        })
         //if(!await exec(device.Init))return;console.log('Init');
         //await SWD.delayms(100);
-        console.log(viewhex(u32t8(await SWD.readMem32(0x20000000,1024))));
+        //console.log(viewhex(u32t8(await SWD.readMem32(0x20000000,1024))));
         let pagesize=device.szPage;
         let binsize=count;
         while(count){
@@ -1848,7 +1857,9 @@
             bin = bin.slice(chunkSize);
             count -= chunkSize;
             console.log(`count:${count} chunk:${chunk.length} index:${index} rate:${index/binsize}`);
+            //await SWD.writeMem32(device.BUFF,chunk).then(e=>exec(device.ProgramPage,device.DevAdr+index,chunkSize,device.BUFF))
             await SWD.writeMem32(device.BUFF,chunk);
+            //console.log(viewhex(u32t8(await SWD.readMem32(device.BUFF,chunkSize))));
             if(!await exec(device.ProgramPage,index+device.DevAdr,chunkSize,device.BUFF))return;
             index+=chunkSize;
             setUploadRate(index/binsize);
@@ -4992,14 +5003,36 @@
                 .catch(console.error); // 链式捕获异常
         }
     }
+    var exec=async (func,r0=0,r1=0,r2=0,r3=0,databuff=download_flm.RSB,sp=download_flm.BUFF-4,bkpt=download_flm.BKPT)=>{
+            await SWD.WriteReg(0,r0)
+            .then(e=>SWD.ReadReg(0,r0))
+            .then(e=>SWD.WriteReg(0,r0))
+            .then(e=>SWD.WriteReg(1,r1))
+            .then(e=>SWD.WriteReg(2,r2))
+            .then(e=>SWD.WriteReg(3,r3))
+            .then(e=>SWD.WriteReg(9,databuff))
+            .then(e=>SWD.WriteReg(13,sp))
+            .then(e=>SWD.WriteReg(14,bkpt))
+            .then(e=>SWD.WriteReg(15,func))
+            .then(e=>SWD.WriteReg(16,0x01000000))
+            .then(e=>SWD.Go());
+            for (let i = 0; i < 64; i++)if(await SWD.isHalt()){console.log(i);return true};
+            return false;
+        }
     var runram = async (ROM) => {
         const data = lastdownloadinfo.ROM;  // 假设为 Uint8Array 或 ArrayBuffer
         const chunkSize = 1024;             // 每次写入 1KB
         const baseAddr = 0x20000000;
-
+        if(! await SWD.isHalt()){
+            await SWD.Halt();
+        }
         // 分块写入
         for (let offset = 0; offset < data.length; offset += chunkSize) {
             const chunk = data.slice(offset, offset + chunkSize);
+            if((chunk.length&3)>0){
+                chunk.push(0xff);
+                chunk.push(0xff);
+            }
             await SWD.writeMem32(baseAddr + offset, chunk);
             // 可以加个小延时避免 SWD 过载（视情况）
             // await delay(1);
@@ -5007,13 +5040,17 @@
 
         // 设置 SP 和 PC（原逻辑保持不变）
         const v = new DataHelper(lastdownloadinfo.ROM);
-        await SWD.WriteReg(13, v.r32());  // SP
-        const sp = await SWD.ReadReg(13);
+        let sp=v.r32();
+        let pc=v.r32()|1;
+        console.log(`halt: ${await SWD.isHalt()}`);
+        await SWD.WriteReg(13, sp);  // SP
+        sp = await SWD.ReadReg(13);
         console.log(`SP: ${Hex32(sp)}`);
-
-        await SWD.WriteReg(15, v.r32() | 1); // PC，设置 Thumb 位
-        const pc = await SWD.ReadReg(15);
+        console.log(`halt: ${await SWD.isHalt()}`);
+        await SWD.WriteReg(15, pc); // PC，设置 Thumb 位
+        pc = await SWD.ReadReg(15);
         console.log(`PC: ${Hex32(pc)}`);
+        await SWD.Go();
     };
     DockBar=null;
     PanelInit=(()=>{
